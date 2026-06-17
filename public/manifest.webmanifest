@@ -1,0 +1,11 @@
+{
+  "name": "小紅書媒體解析器",
+  "short_name": "紅媒體",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#faf8f7",
+  "theme_color": "#f64f63",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
