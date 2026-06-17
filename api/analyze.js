@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { analyzeCopy } from '../src/analyzer.js';
 
 export const maxDuration = 60;
@@ -7,7 +8,25 @@ function setCommonHeaders(res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Access-Control-Allow-Origin', process.env.CORS_ORIGIN || '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-AI-Access-Code');
+}
+
+function secureDigest(value) {
+  return createHash('sha256').update(String(value || ''), 'utf8').digest();
+}
+
+function codesEqual(left, right) {
+  const a = secureDigest(left);
+  const b = secureDigest(right);
+  return timingSafeEqual(a, b);
+}
+
+function getProvidedCode(req, body) {
+  const headerCode = req.headers['x-ai-access-code'];
+  if (typeof headerCode === 'string' && headerCode.trim()) return headerCode.trim();
+  if (Array.isArray(headerCode) && headerCode[0]) return String(headerCode[0]).trim();
+  if (typeof body?.accessCode === 'string' && body.accessCode.trim()) return body.accessCode.trim();
+  return '';
 }
 
 function getBody(req) {
@@ -30,7 +49,19 @@ export default async function handler(req, res) {
   }
 
   try {
-    const result = await analyzeCopy(getBody(req));
+    const body = getBody(req);
+    const requiredCode = String(process.env.AI_ACCESS_CODE || '').trim();
+    if (requiredCode) {
+      const providedCode = getProvidedCode(req, body);
+      if (!providedCode) {
+        return res.status(401).json({ success: false, error: 'AI 分析功能需要密碼', code: 'AI_ACCESS_REQUIRED' });
+      }
+      if (!codesEqual(requiredCode, providedCode)) {
+        return res.status(403).json({ success: false, error: 'AI 分析密碼不正確', code: 'AI_ACCESS_INVALID' });
+      }
+    }
+
+    const result = await analyzeCopy(body);
     return res.status(200).json({ success: true, data: result });
   } catch (error) {
     console.error('copy analysis failed:', error);

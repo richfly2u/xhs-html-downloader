@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Readable } from 'node:stream';
@@ -67,6 +68,25 @@ const mediaLimiter = rateLimit({
   message: { success: false, error: '下載請求太頻繁，請稍後再試' }
 });
 
+function secureDigest(value) {
+  return createHash('sha256').update(String(value || ''), 'utf8').digest();
+}
+
+function codesEqual(left, right) {
+  return timingSafeEqual(secureDigest(left), secureDigest(right));
+}
+
+function aiAccessProtected() {
+  return Boolean(String(process.env.AI_ACCESS_CODE || '').trim());
+}
+
+function getProvidedCode(req) {
+  const headerCode = req.get('x-ai-access-code');
+  if (typeof headerCode === 'string' && headerCode.trim()) return headerCode.trim();
+  if (typeof req.body?.accessCode === 'string' && req.body.accessCode.trim()) return req.body.accessCode.trim();
+  return '';
+}
+
 function mediaProxyUrl(req, directUrl, { download = false, filename = 'media' } = {}) {
   if (!mediaProxyEnabled || !directUrl) return null;
   const query = new URLSearchParams({ url: directUrl });
@@ -77,7 +97,7 @@ function mediaProxyUrl(req, directUrl, { download = false, filename = 'media' } 
 
 app.get('/health', (_req, res) => {
   const aiProvider = process.env.GROQ_API_KEY ? 'groq' : (process.env.OPENAI_API_KEY ? 'openai' : null);
-  res.json({ ok: true, service: 'xhs-html-downloader', version: '0.4.2', mediaProxyEnabled, aiConfigured: Boolean(aiProvider), aiProvider });
+  res.json({ ok: true, service: 'xhs-html-downloader', version: '0.4.3', mediaProxyEnabled, aiConfigured: Boolean(aiProvider), aiProvider, aiAccessProtected: aiAccessProtected() });
 });
 
 app.post('/api/parse', parseLimiter, async (req, res) => {
@@ -167,6 +187,12 @@ app.get('/api/thumbnail', mediaLimiter, async (req, res) => {
 
 app.post('/api/analyze', parseLimiter, async (req, res) => {
   try {
+    const requiredCode = String(process.env.AI_ACCESS_CODE || '').trim();
+    if (requiredCode) {
+      const providedCode = getProvidedCode(req);
+      if (!providedCode) return res.status(401).json({ success: false, error: 'AI 分析功能需要密碼', code: 'AI_ACCESS_REQUIRED' });
+      if (!codesEqual(requiredCode, providedCode)) return res.status(403).json({ success: false, error: 'AI 分析密碼不正確', code: 'AI_ACCESS_INVALID' });
+    }
     const data = await analyzeCopy(req.body || {});
     return res.json({ success: true, data });
   } catch (error) {

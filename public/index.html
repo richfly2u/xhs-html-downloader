@@ -132,6 +132,19 @@
       </div>
 
       <article class="analysis-card">
+        <div class="ai-guard" id="aiGuardBox">
+          <div class="ai-guard-copy">
+            <strong>AI 功能密碼保護</strong>
+            <p>若您已在 Vercel 設定 <code>AI_ACCESS_CODE</code>，請先輸入密碼後再使用 AI 逐字稿與優化文案功能。</p>
+          </div>
+          <div class="ai-guard-row">
+            <input class="input ai-guard-input" id="aiAccessCodeInput" type="password" placeholder="輸入 AI 功能密碼" autocomplete="current-password">
+            <button class="button button-secondary" id="saveAiAccessCodeButton" type="button">儲存密碼</button>
+            <button class="button button-ghost" id="clearAiAccessCodeButton" type="button">清除</button>
+          </div>
+          <p class="ai-guard-status" id="aiAccessCodeStatus">尚未儲存 AI 密碼。公開網址可供任何人使用一般解析功能，建議保護 AI 功能以避免消耗您的 Token。</p>
+        </div>
+
         <div class="analysis-loading" id="analysisLoading">
           <span class="analysis-spinner"></span>
           <div><strong>正在分析文案</strong><p>若已設定 Groq，系統會先將影片語音轉成逐字稿，再產生優化文案。</p></div>

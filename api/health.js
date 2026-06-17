@@ -10,9 +10,10 @@ export default function handler(req, res) {
   return res.status(200).json({
     ok: true,
     service: 'xhs-html-downloader',
-    version: '0.4.2',
+    version: '0.4.3',
     runtime: 'vercel-node-function',
     aiConfigured: Boolean(provider),
-    aiProvider: provider
+    aiProvider: provider,
+    aiAccessProtected: Boolean(String(process.env.AI_ACCESS_CODE || '').trim())
   });
 }

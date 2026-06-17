@@ -24,12 +24,40 @@ const analysisContent = $('analysisContent');
 const analysisStatus = $('analysisStatus');
 const analysisWarning = $('analysisWarning');
 const transcriptBox = $('transcriptBox');
+const aiAccessCodeInput = $('aiAccessCodeInput');
+const saveAiAccessCodeButton = $('saveAiAccessCodeButton');
+const clearAiAccessCodeButton = $('clearAiAccessCodeButton');
+const aiAccessCodeStatus = $('aiAccessCodeStatus');
 let analysisResult = null;
 let analysisRequestId = 0;
 const HISTORY_KEY = 'xhs-html-downloader-history-v1';
+const AI_ACCESS_CODE_KEY = 'xhs-html-downloader-ai-access-code';
 let result = null;
 let toastTimer = null;
 
+
+function getAiAccessCode() {
+  return localStorage.getItem(AI_ACCESS_CODE_KEY) || '';
+}
+
+function setAiAccessCode(value) {
+  const clean = String(value || '').trim();
+  if (clean) localStorage.setItem(AI_ACCESS_CODE_KEY, clean);
+  else localStorage.removeItem(AI_ACCESS_CODE_KEY);
+  syncAiAccessUI();
+}
+
+function syncAiAccessUI(message = '') {
+  const hasCode = Boolean(getAiAccessCode());
+  if (aiAccessCodeInput) aiAccessCodeInput.value = hasCode ? getAiAccessCode() : '';
+  if (aiAccessCodeStatus) {
+    aiAccessCodeStatus.textContent = message || (hasCode
+      ? '已儲存 AI 功能密碼。之後按「重新分析」或解析新內容時，會自動附帶密碼。'
+      : '尚未儲存 AI 密碼。公開網址可供任何人使用一般解析功能，建議保護 AI 功能以避免消耗您的 Token。');
+    aiAccessCodeStatus.classList.toggle('is-ok', hasCode && !message);
+    aiAccessCodeStatus.classList.toggle('is-warn', !hasCode || Boolean(message));
+  }
+}
 
 function showToast(message) {
   const toast = $('toast');
@@ -161,9 +189,12 @@ async function analyzeCurrentResult(data = result) {
   const requestId = ++analysisRequestId;
   resetAnalysisUI();
   try {
+    const aiAccessCode = getAiAccessCode();
+    const headers = { 'content-type': 'application/json' };
+    if (aiAccessCode) headers['x-ai-access-code'] = aiAccessCode;
     const response = await fetch('/api/analyze', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers,
       body: JSON.stringify({
         title: data.title || '',
         description: data.description || '',
@@ -175,8 +206,14 @@ async function analyzeCurrentResult(data = result) {
     const payload = await response.json().catch(() => null);
     if (requestId !== analysisRequestId) return;
     if (!response.ok || !payload?.success) {
+      if (response.status === 401) {
+        syncAiAccessUI('此網站已啟用 AI 密碼保護，請先輸入正確密碼後再重新分析。');
+      } else if (response.status === 403) {
+        syncAiAccessUI('AI 密碼不正確，請重新輸入後再試一次。');
+      }
       throw new Error(payload?.error || `文案分析服務錯誤：HTTP ${response.status}`);
     }
+    if (aiAccessCode) syncAiAccessUI();
     renderAnalysis(payload.data);
   } catch (error) {
     if (requestId !== analysisRequestId) return;
@@ -359,6 +396,7 @@ function readHistory() {
 function saveHistory(items) {
   localStorage.setItem(HISTORY_KEY, JSON.stringify(items.slice(0, 8)));
   renderHistory();
+syncAiAccessUI();
 }
 
 function addHistory(data) {
@@ -530,13 +568,37 @@ $('retryAnalysisButton').addEventListener('click', () => analyzeCurrentResult(re
 $('clearHistoryButton').addEventListener('click', () => {
   localStorage.removeItem(HISTORY_KEY);
   renderHistory();
+syncAiAccessUI();
   showToast('已清除最近紀錄');
 });
 themeButton.addEventListener('click', () => {
   applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
 });
 
+saveAiAccessCodeButton.addEventListener('click', () => {
+  const value = aiAccessCodeInput.value.trim();
+  if (!value) {
+    setAiAccessCode('');
+    syncAiAccessUI('尚未輸入密碼，請先填入 AI 功能密碼。');
+    return;
+  }
+  setAiAccessCode(value);
+  showToast('已儲存 AI 功能密碼');
+  if (result) analyzeCurrentResult(result);
+});
+
+clearAiAccessCodeButton.addEventListener('click', () => {
+  setAiAccessCode('');
+  syncAiAccessUI();
+  showToast('已清除 AI 功能密碼');
+});
+
+aiAccessCodeInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') saveAiAccessCodeButton.click();
+});
+
 const preferredTheme = localStorage.getItem('xhs-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
 applyTheme(preferredTheme);
 updateCounter();
 renderHistory();
+syncAiAccessUI();

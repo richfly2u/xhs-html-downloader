@@ -1,3 +1,20 @@
+# xhs-html-downloader v0.4.3 (AI 密碼保護版)
+
+新增功能：
+- AI 分析 API 可透過 `AI_ACCESS_CODE` 啟用密碼保護。
+- 公開訪客仍可正常解析與下載影片／圖片。
+- 只有知道密碼的人，才能觸發 AI 逐字稿、AI 文案分析與優化口播稿，避免消耗您的 Groq / OpenAI Token。
+
+## 新增環境變數
+
+```env
+AI_ACCESS_CODE=您自己設定的一組密碼
+```
+
+若未設定 `AI_ACCESS_CODE`，AI 功能仍維持公開。設定完成後，前端會要求輸入密碼並儲存在目前瀏覽器的 localStorage。
+
+---
+
 # 小紅書公開媒體解析器 v0.4.2（HTML + Vercel + Groq）
 
 功能：

@@ -237,3 +237,41 @@ footer { width: min(calc(100% - 36px), var(--max)); margin: 0 auto; padding: 0 0
   .analysis-grid, .analysis-columns { grid-template-columns: 1fr; }
   .analysis-grid .analysis-wide { grid-column: auto; }
 }
+
+.ai-guard {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  margin-bottom: 18px;
+  border: 1px solid var(--line, rgba(255,255,255,.1));
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--card-bg, #fff) 78%, transparent);
+}
+
+.ai-guard-copy p {
+  margin: 6px 0 0;
+}
+
+.ai-guard-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ai-guard-input {
+  flex: 1 1 260px;
+}
+
+.ai-guard-status {
+  margin: 0;
+  font-size: .94rem;
+  color: var(--text-soft, #666);
+}
+
+.ai-guard-status.is-ok {
+  color: #0d8a57;
+}
+
+.ai-guard-status.is-warn {
+  color: #b25a00;
+}
