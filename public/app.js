@@ -16,9 +16,20 @@ const copyTextButton = $('copyTextButton');
 const historySection = $('historySection');
 const historyList = $('historyList');
 const themeButton = $('themeButton');
+const analysisSection = $('analysisSection');
+const analysisLoading = $('analysisLoading');
+const analysisError = $('analysisError');
+const analysisErrorText = $('analysisErrorText');
+const analysisContent = $('analysisContent');
+const analysisStatus = $('analysisStatus');
+const analysisWarning = $('analysisWarning');
+const transcriptBox = $('transcriptBox');
+let analysisResult = null;
+let analysisRequestId = 0;
 const HISTORY_KEY = 'xhs-html-downloader-history-v1';
 let result = null;
 let toastTimer = null;
+
 
 function showToast(message) {
   const toast = $('toast');
@@ -60,6 +71,140 @@ async function copyText(value, successMessage) {
     helper.remove();
     showToast(successMessage);
   }
+}
+
+
+function analysisModeName(mode) {
+  const names = {
+    'ai-video': 'AI 影片語音＋文案',
+    'ai-caption': 'AI 貼文文案',
+    'local-caption': '內建文案分析'
+  };
+  return names[mode] || '自動文案分析';
+}
+
+function resetAnalysisUI() {
+  analysisResult = null;
+  analysisSection.classList.remove('is-hidden');
+  analysisLoading.classList.remove('is-hidden');
+  analysisError.classList.add('is-hidden');
+  analysisContent.classList.add('is-hidden');
+  analysisStatus.classList.remove('is-done');
+  analysisStatus.lastChild.textContent = '分析中';
+  analysisWarning.classList.add('is-hidden');
+  transcriptBox.classList.add('is-hidden');
+}
+
+function renderList(id, items) {
+  const list = $(id);
+  list.textContent = '';
+  for (const value of items || []) {
+    const li = document.createElement('li');
+    li.textContent = value;
+    list.appendChild(li);
+  }
+}
+
+function renderAnalysis(data) {
+  analysisResult = data;
+  analysisLoading.classList.add('is-hidden');
+  analysisError.classList.add('is-hidden');
+  analysisContent.classList.remove('is-hidden');
+  analysisStatus.classList.add('is-done');
+  analysisStatus.lastChild.textContent = '已完成';
+
+  $('analysisMode').textContent = analysisModeName(data.mode);
+  $('analysisSummary').textContent = data.summary || '分析完成';
+  $('analysisHook').textContent = data.hook || '—';
+  $('analysisAudience').textContent = data.audience || '—';
+  $('analysisStructure').textContent = data.structure || '—';
+  renderList('analysisStrengths', data.strengths);
+  renderList('analysisImprovements', data.improvements);
+
+  const keywords = $('analysisKeywords');
+  keywords.textContent = '';
+  for (const value of data.keywords || []) {
+    const tag = document.createElement('span');
+    tag.textContent = `#${String(value).replace(/^#/, '')}`;
+    keywords.appendChild(tag);
+  }
+  keywords.classList.toggle('is-hidden', !data.keywords?.length);
+  $('optimizedCopy').textContent = data.optimizedCopy || '';
+
+  if (data.warning) {
+    analysisWarning.textContent = data.warning;
+    analysisWarning.classList.remove('is-hidden');
+  } else {
+    analysisWarning.classList.add('is-hidden');
+  }
+
+  if (data.transcript || data.transcriptionStatus) {
+    $('transcriptionStatus').textContent = data.transcriptionStatus || '';
+    $('transcriptText').textContent = data.transcript || '沒有取得逐字稿。';
+    transcriptBox.classList.remove('is-hidden');
+  } else {
+    transcriptBox.classList.add('is-hidden');
+  }
+}
+
+function showAnalysisError(message) {
+  analysisLoading.classList.add('is-hidden');
+  analysisContent.classList.add('is-hidden');
+  analysisError.classList.remove('is-hidden');
+  analysisErrorText.textContent = message;
+  analysisStatus.classList.remove('is-done');
+  analysisStatus.lastChild.textContent = '未完成';
+}
+
+async function analyzeCurrentResult(data = result) {
+  if (!data) return;
+  const requestId = ++analysisRequestId;
+  resetAnalysisUI();
+  try {
+    const response = await fetch('/api/analyze', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        title: data.title || '',
+        description: data.description || '',
+        author: data.author || '',
+        sourceUrl: data.sourceUrl || '',
+        videoUrl: data.video?.directUrl || data.videoUrl || ''
+      })
+    });
+    const payload = await response.json().catch(() => null);
+    if (requestId !== analysisRequestId) return;
+    if (!response.ok || !payload?.success) {
+      throw new Error(payload?.error || `文案分析服務錯誤：HTTP ${response.status}`);
+    }
+    renderAnalysis(payload.data);
+  } catch (error) {
+    if (requestId !== analysisRequestId) return;
+    showAnalysisError(error.message || '文案分析失敗，請稍後再試。');
+  }
+}
+
+function analysisAsText(data) {
+  if (!data) return '';
+  const lines = [
+    `核心摘要：${data.summary || ''}`,
+    `吸睛開頭：${data.hook || ''}`,
+    `目標觀眾：${data.audience || ''}`,
+    `文案結構：${data.structure || ''}`,
+    '',
+    '文案優點：',
+    ...(data.strengths || []).map((item) => `• ${item}`),
+    '',
+    '可改善之處：',
+    ...(data.improvements || []).map((item) => `• ${item}`),
+    '',
+    `關鍵字：${(data.keywords || []).map((item) => `#${String(item).replace(/^#/, '')}`).join(' ')}`,
+    '',
+    '優化後文案：',
+    data.optimizedCopy || ''
+  ];
+  if (data.transcript) lines.push('', '影片逐字稿：', data.transcript);
+  return lines.join('\n');
 }
 
 function parserName(value) {
@@ -171,6 +316,7 @@ function renderResult(data) {
 
   addHistory(data);
   resultSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  analyzeCurrentResult(data);
 }
 
 async function parseCurrentInput() {
@@ -289,8 +435,9 @@ function applyTheme(theme) {
 }
 
 downloadButton.addEventListener('click', () => {
+  if (!analysisResult && result) analyzeCurrentResult(result);
   if (downloadButton.dataset.external === '1') {
-    showToast('已開啟原始媒體，可用瀏覽器下載或另存');
+    showToast('已開啟原始媒體，文案分析會在原頁繼續進行');
   }
 });
 
@@ -317,6 +464,9 @@ clearButton.addEventListener('click', () => {
 });
 copyLinkButton.addEventListener('click', () => copyText(copyLinkButton.dataset.url, '已複製媒體直連'));
 copyTextButton.addEventListener('click', () => copyText(result?.description, '已複製文案'));
+$('copyOptimizedButton').addEventListener('click', () => copyText(analysisResult?.optimizedCopy, '已複製優化文案'));
+$('copyAnalysisButton').addEventListener('click', () => copyText(analysisAsText(analysisResult), '已複製完整分析'));
+$('retryAnalysisButton').addEventListener('click', () => analyzeCurrentResult(result));
 $('clearHistoryButton').addEventListener('click', () => {
   localStorage.removeItem(HISTORY_KEY);
   renderHistory();

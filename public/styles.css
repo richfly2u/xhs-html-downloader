@@ -195,3 +195,45 @@ footer { width: min(calc(100% - 36px), var(--max)); margin: 0 auto; padding: 0 0
   .image-item { min-height: 280px; }
   .how-card { align-items: flex-start; }
 }
+
+.analysis-section { margin-top: 42px; }
+.analysis-status { display: inline-flex; align-items: center; gap: 7px; padding: 7px 11px; border-radius: 999px; color: var(--accent); background: var(--accent-soft); font-size: 12px; font-weight: 800; }
+.analysis-status span { width: 7px; height: 7px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 4px rgba(246,79,99,.1); }
+.analysis-status.is-done { color: var(--success); background: rgba(37,168,105,.09); }
+.analysis-card { padding: clamp(22px, 4vw, 38px); border: 1px solid var(--line); border-radius: var(--radius-xl); background: var(--surface); box-shadow: var(--shadow); backdrop-filter: blur(22px); }
+.analysis-loading { min-height: 170px; display: flex; align-items: center; justify-content: center; gap: 15px; color: var(--muted); text-align: left; }
+.analysis-loading strong { display: block; color: var(--text); font-size: 17px; }
+.analysis-loading p { margin: 5px 0 0; font-size: 12px; line-height: 1.6; }
+.analysis-spinner { width: 30px; height: 30px; flex: 0 0 auto; border: 3px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+.analysis-error { padding: 20px; border: 1px solid rgba(207,56,75,.18); border-radius: 16px; background: rgba(246,79,99,.08); color: #c83247; }
+.analysis-error p { margin: 7px 0 8px; color: inherit; line-height: 1.65; }
+.analysis-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+.analysis-mode { display: inline-flex; min-height: 28px; align-items: center; padding: 0 11px; border-radius: 999px; color: #fff; background: linear-gradient(135deg, #7c5cff, #5f73ff); font-size: 11px; font-weight: 800; }
+.analysis-warning { color: #b66a12; font-size: 11px; line-height: 1.45; }
+.analysis-summary { padding: 20px; border-radius: 18px; background: linear-gradient(135deg, var(--accent-soft), var(--bg-soft)); }
+.analysis-kicker { margin: 0 0 6px; color: var(--accent); font-size: 10px; font-weight: 900; letter-spacing: .12em; }
+.analysis-summary h3 { margin: 0; font-size: clamp(20px, 3vw, 28px); line-height: 1.45; letter-spacing: -.025em; }
+.analysis-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+.analysis-grid > div { padding: 16px; border: 1px solid var(--line); border-radius: 16px; background: var(--bg-soft); }
+.analysis-grid .analysis-wide { grid-column: 1 / -1; }
+.analysis-grid span { color: var(--accent); font-size: 10px; font-weight: 900; letter-spacing: .08em; }
+.analysis-grid p { margin: 7px 0 0; font-size: 13px; line-height: 1.7; }
+.analysis-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
+.analysis-columns > div { padding: 18px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface-solid); }
+.analysis-columns h4, .optimized-heading h4 { margin: 0; font-size: 14px; }
+.analysis-columns ul { margin: 12px 0 0; padding-left: 20px; color: var(--muted); font-size: 13px; line-height: 1.8; }
+.keyword-row { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 14px; }
+.keyword-row span { padding: 7px 10px; border-radius: 999px; color: var(--accent); background: var(--accent-soft); font-size: 11px; font-weight: 750; }
+.optimized-box { margin-top: 16px; overflow: hidden; border: 1px solid var(--line); border-radius: 18px; background: var(--bg-soft); }
+.optimized-heading { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px 0; }
+.optimized-box pre { margin: 0; padding: 14px 16px 18px; color: var(--text); font: inherit; font-size: 13px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; }
+.transcript-box { margin-top: 14px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface-solid); }
+.transcript-box summary { cursor: pointer; color: var(--accent); font-size: 13px; font-weight: 800; }
+.transcript-box p { margin: 10px 0 0; color: var(--muted); font-size: 11px; }
+.transcript-box div { max-height: 260px; overflow: auto; margin-top: 10px; padding: 12px; border-radius: 12px; background: var(--bg-soft); color: var(--muted); font-size: 12px; line-height: 1.8; white-space: pre-wrap; }
+.analysis-copy-all { width: 100%; margin-top: 14px; }
+
+@media (max-width: 760px) {
+  .analysis-grid, .analysis-columns { grid-template-columns: 1fr; }
+  .analysis-grid .analysis-wide { grid-column: auto; }
+}

@@ -8,6 +8,7 @@ import express from 'express';
 import helmet from 'helmet';
 import { rateLimit } from 'express-rate-limit';
 import { probeMedia, resolvePublicShare } from './resolver.js';
+import { analyzeCopy } from './analyzer.js';
 import {
   assertHttpUrl,
   assertPublicResolution,
@@ -74,7 +75,7 @@ function mediaProxyUrl(req, directUrl, { download = false, filename = 'media' } 
 }
 
 app.get('/health', (_req, res) => {
-  res.json({ ok: true, service: 'xhs-html-downloader', version: '0.3.0', mediaProxyEnabled });
+  res.json({ ok: true, service: 'xhs-html-downloader', version: '0.4.0', mediaProxyEnabled, aiConfigured: Boolean(process.env.OPENAI_API_KEY) });
 });
 
 app.post('/api/parse', parseLimiter, async (req, res) => {
@@ -136,6 +137,18 @@ app.post('/api/parse', parseLimiter, async (req, res) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : '解析失敗';
     const status = error?.code === 'MEDIA_NOT_FOUND' ? 422 : 400;
+    return res.status(status).json({ success: false, error: message });
+  }
+});
+
+
+app.post('/api/analyze', parseLimiter, async (req, res) => {
+  try {
+    const data = await analyzeCopy(req.body || {});
+    return res.json({ success: true, data });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '文案分析失敗';
+    const status = error?.code === 'NO_ANALYSIS_SOURCE' ? 422 : 400;
     return res.status(status).json({ success: false, error: message });
   }
 });

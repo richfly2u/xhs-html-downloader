@@ -3,7 +3,8 @@ export default function handler(req, res) {
   return res.status(200).json({
     ok: true,
     service: 'xhs-html-downloader',
-    version: '0.3.1',
-    runtime: 'vercel-node-function'
+    version: '0.4.0',
+    runtime: 'vercel-node-function',
+    aiConfigured: Boolean(process.env.OPENAI_API_KEY)
   });
 }

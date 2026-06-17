@@ -1,52 +1,66 @@
-# 小紅書公開媒體解析器 — Vercel 版 v0.3
+# 小紅書公開媒體解析＋自動文案分析器 v0.4.0
 
-這個版本已整理成可直接匯入 Vercel 的單一專案根目錄。
+## 新功能
 
-## 本機啟動
+- 解析完成後自動分析貼文標題與文案。
+- 顯示核心摘要、吸睛開頭、目標觀眾、文案結構、優點、改善建議與關鍵字。
+- 自動產生一份可複製的優化文案。
+- 沒有 AI 金鑰也能使用內建文案分析。
+- 設定 OpenAI API 金鑰後，可用 AI 深度分析；影片小於設定上限時，也會嘗試先做語音轉文字再分析。
+
+## Vercel API
+
+- `POST /api/parse`：解析公開小紅書分享連結。
+- `POST /api/analyze`：分析標題、貼文文案及可選的影片語音。
+- `GET /api/health`：健康檢查及 AI 設定狀態。
+
+## Vercel 環境變數
+
+基本解析：
+
+```text
+REQUEST_TIMEOUT_MS=20000
+MAX_HTML_BYTES=4194304
+```
+
+啟用 AI 深度分析與影片語音轉文字：
+
+```text
+OPENAI_API_KEY=您的 API Key
+OPENAI_TEXT_MODEL=gpt-5.5
+OPENAI_TRANSCRIBE_MODEL=gpt-4o-mini-transcribe
+AI_TRANSCRIBE_VIDEO=true
+MAX_TRANSCRIBE_BYTES=25165824
+AI_TIMEOUT_MS=55000
+AI_MEDIA_TIMEOUT_MS=45000
+```
+
+`OPENAI_API_KEY` 只能放在 Vercel 環境變數，不要寫進前端、GitHub 或任何公開檔案。
+
+若未設定 `OPENAI_API_KEY`，貼文有標題或文案時仍會使用內建規則自動分析。若只貼 MP4 直連，因為直連本身沒有貼文文字，需要 AI 語音轉錄才能分析內容。
+
+## 部署更新
+
+將本版檔案覆蓋到既有專案後：
 
 ```bash
-copy .env.example .env
+git add .
+git commit -m "Add automatic copy analysis"
+git push
+```
+
+Vercel 會由 GitHub 自動重新部署。
+
+## 本機執行
+
+```bash
 npm install
+npm test
 npm start
 ```
 
 開啟 `http://127.0.0.1:8787`。
 
-## 部署到 Vercel（GitHub）
+## 使用限制
 
-1. 把本資料夾中的所有檔案推送到 GitHub 倉庫根目錄。
-2. 在 Vercel 選擇 **Add New → Project**，匯入該 GitHub 倉庫。
-3. Framework Preset 保持 **Other**；Root Directory 保持倉庫根目錄。
-4. 不需要設定 Build Command 或 Output Directory。
-5. 建議在 Environment Variables 加入：
-
-```text
-ENABLE_MEDIA_PROXY=false
-REQUEST_TIMEOUT_MS=20000
-MAX_HTML_BYTES=4194304
-TRUST_PROXY=true
-```
-
-6. 按 Deploy。
-
-部署完成後測試：
-
-- `/health`
-- 首頁貼入一條小紅書分享連結
-
-## 為什麼 Vercel 要關閉媒體代理
-
-Vercel Function 的請求或回應 payload 上限為 4.5 MB。影片常遠大於此限制，因此 Vercel 版只負責解析，影片預覽與下載會直接使用小紅書 CDN 網址，不讓影片流量經過 Vercel Function。
-
-若需要伺服器強制以附件方式中轉大型影片，請把 `/api/media` 部署到沒有 4.5 MB 回應限制的服務，例如一般 VPS、Render、Railway 或 Cloudflare 方案，再由前端呼叫該服務。
-
-## 目錄
-
-```text
-public/          HTML、CSS、瀏覽器 JavaScript
-src/index.js     Vercel Express 入口（default export）
-src/local.js     本機啟動入口
-src/resolver.js  公開分享頁解析
-src/utils.js     網址與安全檢查
-vercel.json      Vercel 設定
-```
+僅解析不需登入且公開可存取的分享頁面。請尊重作者權利、平台規範及適用法律。

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#f64f63">
-  <meta name="description" content="貼上小紅書公開分享文字或連結，解析影片與圖片。">
+  <meta name="description" content="貼上小紅書公開分享文字或連結，解析影片、圖片，並自動分析貼文文案。">
   <title>小紅書媒體解析器</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="manifest" href="/manifest.webmanifest">
@@ -30,7 +30,7 @@
   <main class="page-shell">
     <section class="hero">
       <div class="eyebrow"><span></span> HTML 網頁版</div>
-      <h1>貼上連結，<em>提取影片與圖片</em></h1>
+      <h1>貼上連結，<em>提取影片、圖片與文案</em></h1>
       <p>支援小紅書公開分享文字、短連結，以及小紅書 CDN 媒體直連。無需微信小程序，電腦與手機瀏覽器皆可操作。</p>
     </section>
 
@@ -118,6 +118,73 @@
             </button>
             <button class="button button-ghost is-hidden" id="copyTextButton" type="button">複製文案</button>
           </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="analysis-section is-hidden" id="analysisSection" aria-live="polite">
+      <div class="section-title-row">
+        <div>
+          <p class="step-label">STEP 03</p>
+          <h2>自動文案分析</h2>
+        </div>
+        <span class="analysis-status" id="analysisStatus"><span></span>準備中</span>
+      </div>
+
+      <article class="analysis-card">
+        <div class="analysis-loading" id="analysisLoading">
+          <span class="analysis-spinner"></span>
+          <div><strong>正在分析文案</strong><p>若已設定 AI，系統也會嘗試將影片語音轉成文字。</p></div>
+        </div>
+
+        <div class="analysis-error is-hidden" id="analysisError">
+          <strong>暫時無法分析</strong>
+          <p id="analysisErrorText"></p>
+          <button class="text-button" id="retryAnalysisButton" type="button">重新分析</button>
+        </div>
+
+        <div class="analysis-content is-hidden" id="analysisContent">
+          <div class="analysis-meta">
+            <span class="analysis-mode" id="analysisMode">文案分析</span>
+            <span class="analysis-warning is-hidden" id="analysisWarning"></span>
+          </div>
+
+          <div class="analysis-summary">
+            <p class="analysis-kicker">核心摘要</p>
+            <h3 id="analysisSummary"></h3>
+          </div>
+
+          <div class="analysis-grid">
+            <div><span>吸睛開頭</span><p id="analysisHook"></p></div>
+            <div><span>目標觀眾</span><p id="analysisAudience"></p></div>
+            <div class="analysis-wide"><span>文案結構</span><p id="analysisStructure"></p></div>
+          </div>
+
+          <div class="analysis-columns">
+            <div>
+              <h4>文案優點</h4>
+              <ul id="analysisStrengths"></ul>
+            </div>
+            <div>
+              <h4>可改善之處</h4>
+              <ul id="analysisImprovements"></ul>
+            </div>
+          </div>
+
+          <div class="keyword-row" id="analysisKeywords"></div>
+
+          <div class="optimized-box">
+            <div class="optimized-heading"><h4>優化後文案</h4><button class="text-button" id="copyOptimizedButton" type="button">複製文案</button></div>
+            <pre id="optimizedCopy"></pre>
+          </div>
+
+          <details class="transcript-box is-hidden" id="transcriptBox">
+            <summary>查看影片語音逐字稿</summary>
+            <p id="transcriptionStatus"></p>
+            <div id="transcriptText"></div>
+          </details>
+
+          <button class="button button-secondary analysis-copy-all" id="copyAnalysisButton" type="button">複製完整分析</button>
         </div>
       </article>
     </section>
