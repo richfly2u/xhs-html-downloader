@@ -2,7 +2,6 @@ import { probeMedia } from './resolver.js';
 import { assertHttpUrl, assertPublicResolution, isMediaHost, unique } from './utils.js';
 
 const OPENAI_API_BASE = 'https://api.openai.com/v1';
-const GROQ_API_BASE = 'https://api.groq.com/openai/v1';
 const DEFAULT_MAX_TRANSCRIBE_BYTES = 24 * 1024 * 1024;
 const DEFAULT_AI_TIMEOUT_MS = 55_000;
 
@@ -111,100 +110,6 @@ function localAnalysis({ title, description, transcript }) {
   };
 }
 
-function getAIProvider() {
-  if (process.env.GROQ_API_KEY) return 'groq';
-  if (process.env.OPENAI_API_KEY) return 'openai';
-  return null;
-}
-
-function extractJsonObject(text) {
-  const source = cleanText(text, 50_000)
-    .replace(/^```(?:json)?\s*/i, '')
-    .replace(/\s*```$/i, '')
-    .trim();
-  try {
-    return JSON.parse(source);
-  } catch {
-    const start = source.indexOf('{');
-    const end = source.lastIndexOf('}');
-    if (start >= 0 && end > start) return JSON.parse(source.slice(start, end + 1));
-    throw new Error('AI 回傳內容不是有效 JSON');
-  }
-}
-
-function normalizeAnalysis(value, fallbackSource = '') {
-  const fallback = localAnalysis({ title: '', description: fallbackSource, transcript: '' });
-  const strings = (items) => Array.isArray(items)
-    ? items.map((item) => cleanText(item, 300)).filter(Boolean).slice(0, 5)
-    : [];
-  const keywords = Array.isArray(value?.keywords)
-    ? value.keywords.map((item) => cleanText(item, 60).replace(/^#/, '')).filter(Boolean).slice(0, 10)
-    : fallback.keywords;
-
-  return {
-    summary: cleanText(value?.summary, 500) || fallback.summary,
-    hook: cleanText(value?.hook, 300) || fallback.hook,
-    audience: cleanText(value?.audience, 300) || fallback.audience,
-    structure: cleanText(value?.structure, 600) || fallback.structure,
-    strengths: strings(value?.strengths).length ? strings(value.strengths) : fallback.strengths,
-    improvements: strings(value?.improvements).length ? strings(value.improvements) : fallback.improvements,
-    keywords,
-    optimizedCopy: cleanText(value?.optimizedCopy, 12_000) || fallback.optimizedCopy
-  };
-}
-
-function buildAnalysisInput({ title, description, transcript }) {
-  return [
-    title ? `標題：${title}` : '',
-    description ? `原始貼文文案：\n${description}` : '',
-    transcript ? `影片語音逐字稿：\n${transcript}` : ''
-  ].filter(Boolean).join('\n\n');
-}
-
-function analysisSystemPrompt() {
-  return [
-    '你是繁體中文短影音文案與口播稿顧問。',
-    '請根據使用者提供的標題、貼文文案與影片逐字稿分析，不得捏造不存在的資訊。',
-    'optimizedCopy 必須是一份可直接朗讀或發布的繁體中文優化稿：開頭吸睛、語句口語自然、刪除贅詞、保留原意、段落清楚，結尾加入合適行動呼籲。',
-    '只輸出 JSON，不要 Markdown，不要解釋。JSON 欄位固定為：summary、hook、audience、structure、strengths、improvements、keywords、optimizedCopy。',
-    'strengths 與 improvements 為字串陣列；keywords 不要加 #；其餘欄位為字串。'
-  ].join('');
-}
-
-async function groqJsonAnalysis({ title, description, transcript }) {
-  const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey) throw new Error('GROQ_API_KEY 未設定');
-  const model = process.env.GROQ_TEXT_MODEL || 'llama-3.3-70b-versatile';
-  const input = buildAnalysisInput({ title, description, transcript });
-
-  const response = await fetch(`${GROQ_API_BASE}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${apiKey}`,
-      'content-type': 'application/json'
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: 'system', content: analysisSystemPrompt() },
-        { role: 'user', content: input }
-      ],
-      response_format: { type: 'json_object' },
-      temperature: 0.35,
-      max_completion_tokens: 2200
-    }),
-    signal: AbortSignal.timeout(Number(process.env.AI_TIMEOUT_MS || DEFAULT_AI_TIMEOUT_MS))
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const detail = payload?.error?.message || `HTTP ${response.status}`;
-    throw new Error(`Groq 文案分析失敗：${detail}`);
-  }
-  const text = payload?.choices?.[0]?.message?.content;
-  if (!text) throw new Error('Groq 沒有回傳可用的分析內容');
-  return { analysis: normalizeAnalysis(extractJsonObject(text), input), model, provider: 'groq' };
-}
-
 function getResponseText(payload) {
   if (typeof payload?.output_text === 'string' && payload.output_text.trim()) {
     return payload.output_text.trim();
@@ -223,7 +128,11 @@ async function openAIJsonAnalysis({ title, description, transcript }) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error('OPENAI_API_KEY 未設定');
   const model = process.env.OPENAI_TEXT_MODEL || 'gpt-5.5';
-  const input = buildAnalysisInput({ title, description, transcript });
+  const input = [
+    title ? `標題：${title}` : '',
+    description ? `原始貼文文案：\n${description}` : '',
+    transcript ? `影片語音逐字稿：\n${transcript}` : ''
+  ].filter(Boolean).join('\n\n');
 
   const schema = {
     type: 'object',
@@ -244,8 +153,13 @@ async function openAIJsonAnalysis({ title, description, transcript }) {
   const body = {
     model,
     store: false,
-    max_output_tokens: 2200,
-    instructions: analysisSystemPrompt(),
+    max_output_tokens: 1800,
+    instructions: [
+      '你是繁體中文短影音文案顧問。',
+      '請根據提供的標題、貼文文案與逐字稿分析，不得捏造影片中沒有的資訊。',
+      '輸出應實用、具體、語氣自然，並提供一份可直接發布的優化文案。',
+      '關鍵字不要加 #，optimizedCopy 內可以加入適量標籤。'
+    ].join(''),
     input,
     text: {
       format: {
@@ -270,17 +184,11 @@ async function openAIJsonAnalysis({ title, description, transcript }) {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     const detail = payload?.error?.message || `HTTP ${response.status}`;
-    throw new Error(`OpenAI 文案分析失敗：${detail}`);
+    throw new Error(`AI 文案分析失敗：${detail}`);
   }
   const text = getResponseText(payload);
-  if (!text) throw new Error('OpenAI 沒有回傳可用的分析內容');
-  return { analysis: normalizeAnalysis(extractJsonObject(text), input), model, provider: 'openai' };
-}
-
-async function analyzeWithAI(provider, source) {
-  if (provider === 'groq') return groqJsonAnalysis(source);
-  if (provider === 'openai') return openAIJsonAnalysis(source);
-  throw new Error('未設定 AI 金鑰');
+  if (!text) throw new Error('AI 沒有回傳可用的分析內容');
+  return { analysis: JSON.parse(text), model };
 }
 
 async function fetchVideoForTranscription(videoUrl, maxBytes) {
@@ -306,65 +214,30 @@ async function fetchVideoForTranscription(videoUrl, maxBytes) {
   return { buffer, contentType };
 }
 
-async function groqTranscribeByUrl(videoUrl) {
-  const apiKey = process.env.GROQ_API_KEY;
-  const parsed = assertHttpUrl(videoUrl);
-  if (!isMediaHost(parsed.hostname)) throw new Error('僅允許分析小紅書 CDN 影片');
-  await assertPublicResolution(parsed.hostname);
-
-  const form = new FormData();
-  form.append('url', parsed.toString());
-  form.append('model', process.env.GROQ_TRANSCRIBE_MODEL || 'whisper-large-v3-turbo');
-  form.append('response_format', 'json');
-  form.append('language', process.env.TRANSCRIBE_LANGUAGE || 'zh');
-  form.append('temperature', '0');
-  form.append('prompt', '請以繁體中文準確轉錄影片語音，保留專有名詞、料理名稱與品牌名稱。');
-
-  const response = await fetch(`${GROQ_API_BASE}/audio/transcriptions`, {
-    method: 'POST',
-    headers: { authorization: `Bearer ${apiKey}` },
-    body: form,
-    signal: AbortSignal.timeout(Number(process.env.AI_TIMEOUT_MS || DEFAULT_AI_TIMEOUT_MS))
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const detail = payload?.error?.message || `HTTP ${response.status}`;
-    throw new Error(`Groq 影片語音辨識失敗：${detail}`);
+async function transcribeVideo(videoUrl) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey || !videoUrl) return { transcript: null, status: '未啟用影片語音辨識' };
+  if (String(process.env.AI_TRANSCRIBE_VIDEO || 'true').toLowerCase() === 'false') {
+    return { transcript: null, status: '影片語音辨識已關閉' };
   }
-  return cleanText(payload?.text, 24_000) || null;
-}
 
-async function transcribeUploadedVideo(provider, videoUrl) {
   const maxBytes = Math.min(
     Number(process.env.MAX_TRANSCRIBE_BYTES || DEFAULT_MAX_TRANSCRIBE_BYTES),
     25 * 1024 * 1024
   );
   const probe = await probeMedia(videoUrl, 10_000).catch(() => ({ bytes: null }));
   if (probe.bytes && probe.bytes > maxBytes) {
-    throw new Error(`影片 ${(probe.bytes / 1024 / 1024).toFixed(1)} MB，超過語音辨識上限`);
+    return { transcript: null, status: `影片 ${(probe.bytes / 1024 / 1024).toFixed(1)} MB，超過語音辨識上限` };
   }
 
   const { buffer, contentType } = await fetchVideoForTranscription(videoUrl, maxBytes);
   const form = new FormData();
   form.append('file', new Blob([buffer], { type: contentType }), 'video.mp4');
+  form.append('model', process.env.OPENAI_TRANSCRIBE_MODEL || 'gpt-4o-mini-transcribe');
   form.append('response_format', 'json');
   form.append('prompt', '請以繁體中文準確轉錄影片語音，保留專有名詞、料理名稱與品牌名稱。');
 
-  let apiBase;
-  let apiKey;
-  if (provider === 'groq') {
-    apiBase = GROQ_API_BASE;
-    apiKey = process.env.GROQ_API_KEY;
-    form.append('model', process.env.GROQ_TRANSCRIBE_MODEL || 'whisper-large-v3-turbo');
-    form.append('language', process.env.TRANSCRIBE_LANGUAGE || 'zh');
-    form.append('temperature', '0');
-  } else {
-    apiBase = OPENAI_API_BASE;
-    apiKey = process.env.OPENAI_API_KEY;
-    form.append('model', process.env.OPENAI_TRANSCRIBE_MODEL || 'gpt-4o-mini-transcribe');
-  }
-
-  const response = await fetch(`${apiBase}/audio/transcriptions`, {
+  const response = await fetch(`${OPENAI_API_BASE}/audio/transcriptions`, {
     method: 'POST',
     headers: { authorization: `Bearer ${apiKey}` },
     body: form,
@@ -375,35 +248,9 @@ async function transcribeUploadedVideo(provider, videoUrl) {
     const detail = payload?.error?.message || `HTTP ${response.status}`;
     throw new Error(`影片語音辨識失敗：${detail}`);
   }
-  return cleanText(payload?.text, 24_000) || null;
-}
-
-async function transcribeVideo(provider, videoUrl) {
-  if (!provider || !videoUrl) return { transcript: null, status: '未啟用影片語音辨識' };
-  if (String(process.env.AI_TRANSCRIBE_VIDEO || 'true').toLowerCase() === 'false') {
-    return { transcript: null, status: '影片語音辨識已關閉' };
-  }
-
-  let transcript = null;
-  if (provider === 'groq') {
-    try {
-      transcript = await groqTranscribeByUrl(videoUrl);
-    } catch (urlError) {
-      try {
-        transcript = await transcribeUploadedVideo(provider, videoUrl);
-      } catch (uploadError) {
-        const first = urlError instanceof Error ? urlError.message : 'URL 轉錄失敗';
-        const second = uploadError instanceof Error ? uploadError.message : '上傳轉錄失敗';
-        throw new Error(`${first}；備援上傳亦失敗：${second}`);
-      }
-    }
-  } else {
-    transcript = await transcribeUploadedVideo(provider, videoUrl);
-  }
-
   return {
-    transcript,
-    status: transcript ? '已完成影片語音轉文字' : '影片沒有辨識到清楚語音'
+    transcript: cleanText(payload?.text, 24_000) || null,
+    status: payload?.text ? '已完成影片語音轉文字' : '影片沒有辨識到清楚語音'
   };
 }
 
@@ -411,8 +258,7 @@ export async function analyzeCopy(payload = {}) {
   const title = cleanText(payload.title, 500);
   const description = cleanText(payload.description, 12_000);
   const videoUrl = cleanText(payload.videoUrl, 2_000);
-  const provider = getAIProvider();
-  const aiConfigured = Boolean(provider);
+  const aiConfigured = Boolean(process.env.OPENAI_API_KEY);
 
   let transcript = null;
   let transcriptionStatus = aiConfigured ? '沒有提供影片網址' : '未設定 AI 金鑰，僅分析貼文文案';
@@ -420,7 +266,7 @@ export async function analyzeCopy(payload = {}) {
 
   if (aiConfigured && videoUrl) {
     try {
-      const transcription = await transcribeVideo(provider, videoUrl);
+      const transcription = await transcribeVideo(videoUrl);
       transcript = transcription.transcript;
       transcriptionStatus = transcription.status;
     } catch (error) {
@@ -433,19 +279,18 @@ export async function analyzeCopy(payload = {}) {
   if (!hasSourceText) {
     const error = new Error(aiConfigured
       ? '沒有可分析的標題、貼文文案或影片語音'
-      : '這是媒體直連，沒有附帶文案；請先在 Vercel 設定 GROQ_API_KEY，才能聽取影片語音並產生優化稿');
+      : '這是媒體直連，沒有附帶文案；設定 OPENAI_API_KEY 後可嘗試分析影片語音');
     error.code = 'NO_ANALYSIS_SOURCE';
     throw error;
   }
 
   if (aiConfigured) {
     try {
-      const ai = await analyzeWithAI(provider, { title, description, transcript });
+      const ai = await openAIJsonAnalysis({ title, description, transcript });
       return {
         ...ai.analysis,
         mode: transcript ? 'ai-video' : 'ai-caption',
         model: ai.model,
-        provider: ai.provider,
         transcript,
         transcriptionStatus,
         warning,
@@ -460,7 +305,6 @@ export async function analyzeCopy(payload = {}) {
     ...localAnalysis({ title, description, transcript }),
     mode: 'local-caption',
     model: null,
-    provider: null,
     transcript,
     transcriptionStatus,
     warning,

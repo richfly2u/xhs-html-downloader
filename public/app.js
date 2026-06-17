@@ -76,8 +76,8 @@ async function copyText(value, successMessage) {
 
 function analysisModeName(mode) {
   const names = {
-    'ai-video': 'AI 影片語音＋文案',
-    'ai-caption': 'AI 貼文文案',
+    'ai-video': 'Groq AI 影片逐字稿＋優化文案',
+    'ai-caption': 'Groq AI 文案優化',
     'local-caption': '內建文案分析'
   };
   return names[mode] || '自動文案分析';

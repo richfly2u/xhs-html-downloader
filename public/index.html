@@ -116,7 +116,7 @@
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 15 15 9m-7.5 2.5-2 2a3.5 3.5 0 0 0 5 5l2-2m4-9 2-2a3.5 3.5 0 0 0-5-5l-2 2"/></svg>
               複製直連
             </button>
-            <button class="button button-ghost is-hidden" id="copyTextButton" type="button">複製文案</button>
+            <button class="button button-ghost is-hidden" id="copyTextButton" type="button">複製優化稿</button>
           </div>
         </div>
       </article>
@@ -126,7 +126,7 @@
       <div class="section-title-row">
         <div>
           <p class="step-label">STEP 03</p>
-          <h2>自動文案分析</h2>
+          <h2>AI 影片文字分析與優化稿</h2>
         </div>
         <span class="analysis-status" id="analysisStatus"><span></span>準備中</span>
       </div>
@@ -134,7 +134,7 @@
       <article class="analysis-card">
         <div class="analysis-loading" id="analysisLoading">
           <span class="analysis-spinner"></span>
-          <div><strong>正在分析文案</strong><p>若已設定 AI，系統也會嘗試將影片語音轉成文字。</p></div>
+          <div><strong>正在分析文案</strong><p>若已設定 Groq，系統會先將影片語音轉成逐字稿，再產生優化文案。</p></div>
         </div>
 
         <div class="analysis-error is-hidden" id="analysisError">
@@ -174,7 +174,7 @@
           <div class="keyword-row" id="analysisKeywords"></div>
 
           <div class="optimized-box">
-            <div class="optimized-heading"><h4>優化後文案</h4><button class="text-button" id="copyOptimizedButton" type="button">複製文案</button></div>
+            <div class="optimized-heading"><h4>AI 優化口播稿／文案</h4><button class="text-button" id="copyOptimizedButton" type="button">複製優化稿</button></div>
             <pre id="optimizedCopy"></pre>
           </div>
 

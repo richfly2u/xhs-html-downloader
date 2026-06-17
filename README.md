@@ -1,66 +1,67 @@
-# 小紅書公開媒體解析＋自動文案分析器 v0.4.0
+# 小紅書公開媒體解析＋Groq AI 影片文字分析 v0.4.1
 
-## 新功能
+## 修正內容
 
-- 解析完成後自動分析貼文標題與文案。
-- 顯示核心摘要、吸睛開頭、目標觀眾、文案結構、優點、改善建議與關鍵字。
-- 自動產生一份可複製的優化文案。
-- 沒有 AI 金鑰也能使用內建文案分析。
-- 設定 OpenAI API 金鑰後，可用 AI 深度分析；影片小於設定上限時，也會嘗試先做語音轉文字再分析。
+v0.4.0 只讀取 `OPENAI_API_KEY`，所以只設定 `GROQ_API_KEY` 時不會啟用 AI。v0.4.1 已正式支援 Groq：
 
-## Vercel API
-
-- `POST /api/parse`：解析公開小紅書分享連結。
-- `POST /api/analyze`：分析標題、貼文文案及可選的影片語音。
-- `GET /api/health`：健康檢查及 AI 設定狀態。
+- 影片語音轉逐字稿：`whisper-large-v3-turbo`
+- 文案分析與優化稿：`llama-3.3-70b-versatile`
+- 只要 Vercel 有設定 `GROQ_API_KEY`，就會自動啟用
+- 影片直連會先嘗試交由 Groq 讀取；失敗時再以小檔案上傳備援
+- AI 回傳異常時仍會退回內建文案分析，不會整頁空白
 
 ## Vercel 環境變數
 
-基本解析：
+必要：
 
 ```text
-REQUEST_TIMEOUT_MS=20000
-MAX_HTML_BYTES=4194304
+GROQ_API_KEY=您新建立的 Groq 金鑰
 ```
 
-啟用 AI 深度分析與影片語音轉文字：
+建議：
 
 ```text
-OPENAI_API_KEY=您的 API Key
-OPENAI_TEXT_MODEL=gpt-5.5
-OPENAI_TRANSCRIBE_MODEL=gpt-4o-mini-transcribe
+GROQ_TEXT_MODEL=llama-3.3-70b-versatile
+GROQ_TRANSCRIBE_MODEL=whisper-large-v3-turbo
 AI_TRANSCRIBE_VIDEO=true
-MAX_TRANSCRIBE_BYTES=25165824
+TRANSCRIBE_LANGUAGE=zh
 AI_TIMEOUT_MS=55000
 AI_MEDIA_TIMEOUT_MS=45000
+MAX_TRANSCRIBE_BYTES=25165824
 ```
 
-`OPENAI_API_KEY` 只能放在 Vercel 環境變數，不要寫進前端、GitHub 或任何公開檔案。
+金鑰只放在 Vercel 的 Environment Variables，不能寫進 GitHub 或前端。
 
-若未設定 `OPENAI_API_KEY`，貼文有標題或文案時仍會使用內建規則自動分析。若只貼 MP4 直連，因為直連本身沒有貼文文字，需要 AI 語音轉錄才能分析內容。
+## 驗證
 
-## 部署更新
+部署後開啟：
 
-將本版檔案覆蓋到既有專案後：
-
-```bash
-git add .
-git commit -m "Add automatic copy analysis"
-git push
+```text
+https://xhs-html-downloader.vercel.app/api/health
 ```
 
-Vercel 會由 GitHub 自動重新部署。
+正常應看到：
 
-## 本機執行
+```json
+{
+  "ok": true,
+  "version": "0.4.1",
+  "aiConfigured": true,
+  "aiProvider": "groq"
+}
+```
+
+接著回首頁貼入小紅書分享連結。解析完成後會顯示：
+
+- 影片語音逐字稿
+- 核心摘要
+- 文案優缺點
+- AI 優化口播稿／發布文案
+
+## 本機測試
 
 ```bash
 npm install
 npm test
 npm start
 ```
-
-開啟 `http://127.0.0.1:8787`。
-
-## 使用限制
-
-僅解析不需登入且公開可存取的分享頁面。請尊重作者權利、平台規範及適用法律。
