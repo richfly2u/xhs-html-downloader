@@ -152,7 +152,7 @@ textarea::placeholder { color: color-mix(in srgb, var(--muted) 72%, transparent)
 .history-list { display: grid; gap: 8px; }
 .history-item { display: grid; grid-template-columns: 48px minmax(0,1fr) auto; align-items: center; gap: 12px; width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 15px; background: var(--bg-soft); color: var(--text); text-align: left; cursor: pointer; }
 .history-thumb { width: 48px; height: 48px; display: grid; place-items: center; overflow: hidden; border-radius: 12px; background: var(--surface-solid); color: var(--accent); }
-.history-thumb img, .history-thumb video { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+.history-thumb img { width: 100%; height: 100%; object-fit: cover; }
 .history-thumb svg { width: 20px; }
 .history-info { min-width: 0; }
 .history-info strong, .history-info span { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }

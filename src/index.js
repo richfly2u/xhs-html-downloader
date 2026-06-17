@@ -9,6 +9,7 @@ import helmet from 'helmet';
 import { rateLimit } from 'express-rate-limit';
 import { probeMedia, resolvePublicShare } from './resolver.js';
 import { analyzeCopy } from './analyzer.js';
+import { fetchThumbnail } from './thumbnail.js';
 import {
   assertHttpUrl,
   assertPublicResolution,
@@ -76,7 +77,7 @@ function mediaProxyUrl(req, directUrl, { download = false, filename = 'media' } 
 
 app.get('/health', (_req, res) => {
   const aiProvider = process.env.GROQ_API_KEY ? 'groq' : (process.env.OPENAI_API_KEY ? 'openai' : null);
-  res.json({ ok: true, service: 'xhs-html-downloader', version: '0.4.1', mediaProxyEnabled, aiConfigured: Boolean(aiProvider), aiProvider });
+  res.json({ ok: true, service: 'xhs-html-downloader', version: '0.4.2', mediaProxyEnabled, aiConfigured: Boolean(aiProvider), aiProvider });
 });
 
 app.post('/api/parse', parseLimiter, async (req, res) => {
@@ -142,6 +143,27 @@ app.post('/api/parse', parseLimiter, async (req, res) => {
   }
 });
 
+
+app.get('/api/thumbnail', mediaLimiter, async (req, res) => {
+  try {
+    const rawUrl = String(req.query.url || '');
+    if (!rawUrl) return res.status(400).json({ success: false, error: '缺少縮圖網址' });
+    const thumbnail = await fetchThumbnail(rawUrl, {
+      timeoutMs: Number(process.env.THUMBNAIL_TIMEOUT_MS || 15000),
+      maxBytes: Number(process.env.MAX_THUMBNAIL_BYTES || Math.floor(3.5 * 1024 * 1024))
+    });
+    res.setHeader('Content-Type', thumbnail.contentType);
+    res.setHeader('Content-Length', String(thumbnail.buffer.length));
+    res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+    if (thumbnail.etag) res.setHeader('ETag', thumbnail.etag);
+    if (thumbnail.lastModified) res.setHeader('Last-Modified', thumbnail.lastModified);
+    return res.status(200).send(thumbnail.buffer);
+  } catch (error) {
+    const message = error?.name === 'TimeoutError' ? '縮圖載入逾時' : (error?.message || '縮圖載入失敗');
+    const status = error?.code === 'THUMBNAIL_TOO_LARGE' ? 413 : 400;
+    return res.status(status).json({ success: false, error: message });
+  }
+});
 
 app.post('/api/analyze', parseLimiter, async (req, res) => {
   try {

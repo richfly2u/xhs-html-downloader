@@ -29,6 +29,7 @@ test('parsePublicPageHtml reads Open Graph video', () => {
   assert.equal(result.title, '測試影片');
   assert.equal(result.description, '測試文案');
   assert.equal(result.type, 'video');
+  assert.equal(result.cover, 'https://sns-webpic-qc.xhscdn.com/test.jpg');
 });
 
 test('parsePublicPageHtml extracts note data from initial state', () => {

@@ -367,8 +367,7 @@ function addHistory(data) {
   items.unshift({
     sourceUrl: data.sourceUrl,
     title: data.title || '未命名作品',
-    cover: data.cover || data.images?.[0]?.directUrl || data.images?.[0]?.previewUrl || '',
-    mediaUrl: data.video?.directUrl || data.images?.[0]?.directUrl || '',
+    cover: data.cover || data.images?.[0]?.previewUrl || '',
     type: data.type,
     time: Date.now()
   });
@@ -384,72 +383,6 @@ function relativeTime(timestamp) {
   return `${Math.floor(hours / 24)} 天前`;
 }
 
-function historyPlaceholder(thumb, type) {
-  thumb.textContent = '';
-  thumb.innerHTML = type === 'video'
-    ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7L8 5Z"/></svg>'
-    : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4V5Zm3 10 3-3 3 3 2-2 3 3M9 9h.01"/></svg>';
-}
-
-function thumbnailProxyUrl(url) {
-  if (!url) return '';
-  try {
-    const parsed = new URL(url, window.location.href);
-    if (parsed.origin === window.location.origin) return parsed.toString();
-    if (!parsed.hostname.endsWith('.xhscdn.com') && parsed.hostname !== 'xhscdn.com') return url;
-    return `/api/thumbnail?url=${encodeURIComponent(parsed.toString())}`;
-  } catch {
-    return url;
-  }
-}
-
-function renderHistoryThumbnail(thumb, item) {
-  const rawCandidates = [...new Set([item.cover, item.type !== 'video' ? item.mediaUrl : ''].filter(Boolean))];
-  const candidates = [];
-  for (const url of rawCandidates) {
-    const proxied = thumbnailProxyUrl(url);
-    if (proxied) candidates.push(proxied);
-    if (url !== proxied) candidates.push(url);
-  }
-
-  if (candidates.length) {
-    const img = document.createElement('img');
-    img.alt = '';
-    img.loading = 'lazy';
-    img.decoding = 'async';
-    img.referrerPolicy = 'no-referrer';
-    let index = 0;
-    const loadNext = () => {
-      if (index >= candidates.length) {
-        historyPlaceholder(thumb, item.type);
-        return;
-      }
-      img.src = candidates[index++];
-    };
-    img.addEventListener('error', loadNext);
-    thumb.appendChild(img);
-    loadNext();
-    return;
-  }
-
-  if (item.type === 'video' && item.mediaUrl) {
-    const video = document.createElement('video');
-    video.src = item.mediaUrl;
-    video.muted = true;
-    video.playsInline = true;
-    video.preload = 'metadata';
-    video.setAttribute('aria-hidden', 'true');
-    video.addEventListener('loadedmetadata', () => {
-      try { video.currentTime = Math.min(0.1, Number.isFinite(video.duration) ? video.duration / 10 : 0.1); } catch {}
-    }, { once: true });
-    video.addEventListener('error', () => historyPlaceholder(thumb, item.type), { once: true });
-    thumb.appendChild(video);
-    return;
-  }
-
-  historyPlaceholder(thumb, item.type);
-}
-
 function renderHistory() {
   const items = readHistory();
   historyList.textContent = '';
@@ -461,7 +394,14 @@ function renderHistory() {
 
     const thumb = document.createElement('span');
     thumb.className = 'history-thumb';
-    renderHistoryThumbnail(thumb, item);
+    if (item.cover) {
+      const img = document.createElement('img');
+      img.src = item.cover;
+      img.alt = '';
+      thumb.appendChild(img);
+    } else {
+      thumb.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7L8 5Z"/></svg>';
+    }
 
     const info = document.createElement('span');
     info.className = 'history-info';
