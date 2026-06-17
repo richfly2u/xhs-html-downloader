@@ -97,7 +97,7 @@ function mediaProxyUrl(req, directUrl, { download = false, filename = 'media' } 
 
 app.get('/health', (_req, res) => {
   const aiProvider = process.env.GROQ_API_KEY ? 'groq' : (process.env.OPENAI_API_KEY ? 'openai' : null);
-  res.json({ ok: true, service: 'xhs-html-downloader', version: '0.4.3', mediaProxyEnabled, aiConfigured: Boolean(aiProvider), aiProvider, aiAccessProtected: aiAccessProtected() });
+  res.json({ ok: true, service: 'xhs-html-downloader', version: '0.4.4', mediaProxyEnabled, aiConfigured: Boolean(aiProvider), aiProvider, aiAccessProtected: aiAccessProtected() });
 });
 
 app.post('/api/parse', parseLimiter, async (req, res) => {
