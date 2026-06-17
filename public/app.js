@@ -394,7 +394,7 @@ function readHistory() {
 }
 
 function saveHistory(items) {
-  localStorage.setItem(HISTORY_KEY, JSON.stringify(items.slice(0, 8)));
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(items.slice(0, 30)));
   renderHistory();
 syncAiAccessUI();
 }
