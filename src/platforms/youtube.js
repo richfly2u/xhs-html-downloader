@@ -21,36 +21,35 @@ function findYtDlp() {
 }
 const YTDLP_BIN = findYtDlp();
 
-// 代理輪換清單（null = 直接連線，優先使用）
-const PROXY_LIST = [
-  null,
-  'socks5://178.62.78.86:1080',
-  'socks5://51.75.147.219:16379',
-  'socks5://168.119.170.99:1080',
-  'socks5://141.94.106.94:1080',
+// yt-dlp 嘗試策略：不同 client 類型 → 代理輪換
+const STRATEGIES = [
+  [],
+  ['--extractor-args', 'youtube:player_client=android'],
+  ['--extractor-args', 'youtube:player_client=ios'],
+  ['--extractor-args', 'youtube:player_client=web'],
 ];
 
-/** 用 yt-dlp 提取 YouTube 資訊，自動嘗試多個代理 */
-async function ytDlpWithFallback(url, options = {}) {
+async function ytDlpWithFallback(url) {
   const errors = [];
-  for (const proxy of PROXY_LIST) {
+  const common = [url, '-j', '--no-playlist',
+    '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'];
+  for (const extra of STRATEGIES) {
     try {
-      const args = [url, '-j', '--no-playlist',
-        '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'];
-      if (proxy) args.push('--proxy', proxy);
-      return await new Promise((resolve, reject) => {
-        execFile(YTDLP_BIN, args, {
+      const result = await new Promise((resolve, reject) => {
+        execFile(YTDLP_BIN, [...common, ...extra], {
           timeout: 30_000, maxBuffer: 50 * 1024 * 1024
         }, (err, stdout) => {
-          if (err) { reject(new Error(proxy ? `代理(${proxy.slice(0,20)}...): ${err.message}` : err.message)); return; }
+          if (err) { reject(err); return; }
           try { resolve(JSON.parse(stdout)); } catch { reject(new Error('JSON parse error')); }
         });
       });
+      if (result?.formats?.some((f) => f.url)) return result;
+      errors.push(`client ${extra[1]?.split('=')[1] || 'default'}: 無可用的串流網址`);
     } catch (e) {
-      errors.push(e.message);
+      errors.push(`client ${extra[1]?.split('=')[1] || 'default'}: ${e.message.slice(0, 60)}`);
     }
   }
-  throw new Error('yt-dlp 所有代理皆失敗: ' + errors.join('; '));
+  throw new Error('yt-dlp 所有策略皆失敗: ' + errors.join('; '));
 }
 
 export const name = 'youtube';
