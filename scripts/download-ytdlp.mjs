@@ -1,5 +1,6 @@
 // 在 Vercel build 時預先下載 yt-dlp 二進位
-import { mkdir, chmod, createWriteStream } from 'node:fs';
+import { createWriteStream } from 'node:fs';
+import { chmod, mkdir } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
