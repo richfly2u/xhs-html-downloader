@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process';
 import { assertHttpUrl, assertPublicResolution, extractFirstUrl } from '../utils.js';
 
 export const name = 'youtube';
@@ -126,6 +127,26 @@ async function expandAndFetchPage(rawUrl, options) {
   return { html, finalUrl: response.url };
 }
 
+function ytDlpJson(url) {
+  return new Promise((resolve, reject) => {
+    execFile('yt-dlp', ['-j', url, '--no-playlist'], {
+      timeout: 30_000,
+      maxBuffer: 10 * 1024 * 1024,
+      windowsHide: true
+    }, (error, stdout) => {
+      if (error) {
+        reject(new Error(`yt-dlp 執行失敗：${error.message}`));
+        return;
+      }
+      try {
+        resolve(JSON.parse(stdout));
+      } catch {
+        reject(new Error('yt-dlp 輸出不是有效 JSON'));
+      }
+    });
+  });
+}
+
 export async function resolveShare(inputText, options) {
   const extracted = extractFirstUrl(inputText);
   if (!extracted) throw new Error('找不到可解析的網址');
@@ -133,6 +154,38 @@ export async function resolveShare(inputText, options) {
   const videoId = extractVideoId(input.toString());
   if (!videoId) throw new Error('找不到 YouTube 影片 ID');
 
-  const { html, finalUrl } = await expandAndFetchPage(input.toString(), options);
-  return parseWatchPage(html, finalUrl);
+  // Step 1: 先從頁面 HTML 提取
+  let result;
+  try {
+    const { html, finalUrl } = await expandAndFetchPage(input.toString(), options);
+    result = parseWatchPage(html, finalUrl);
+  } catch {
+    result = {
+      sourceUrl: input.toString(), noteId: videoId,
+      title: null, description: null, author: null, cover: null,
+      type: 'video', videoUrl: null, alternatives: [], images: [],
+      parser: 'page-media-scan', platform: 'youtube'
+    };
+  }
+
+  // Step 2: 若頁面解析沒拿到影片網址，用 yt-dlp 提取
+  if (!result.videoUrl) {
+    try {
+      const ytData = await ytDlpJson(input.toString());
+      const formats = ytData.formats || [];
+      // 優先選同時含視訊和音訊的格式
+      const best = formats
+        .filter((f) => f.url && f.acodec !== 'none' && f.vcodec !== 'none')
+        .sort((a, b) => (b.height || 0) - (a.height || 0))[0];
+      result.videoUrl = best?.url || result.videoUrl;
+      result.title = result.title || ytData.title || null;
+      result.description = result.description || ytData.description || null;
+      result.author = result.author || ytData.uploader || null;
+      result.cover = result.cover || ytData.thumbnail || null;
+    } catch {
+      // yt-dlp 失敗就保留頁面取得的資料
+    }
+  }
+
+  return result;
 }
