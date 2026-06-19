@@ -1,50 +1,5 @@
-import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { mkdir, chmod } from 'node:fs/promises';
-import { createWriteStream } from 'node:fs';
-import { pipeline } from 'node:stream/promises';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import ytdl from '@distube/ytdl-core';
 import { assertHttpUrl, assertPublicResolution, extractFirstUrl } from '../utils.js';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-// 優先使用 node_modules 內建二進位，若無則用 /tmp（Vercel Lambda 可寫目錄）
-const BIN_DIRS = [
-  path.resolve(__dirname, '../../bin'),               // vercel-build 預先下載
-  path.resolve(__dirname, '../../node_modules/youtube-dl-exec/bin'), // npm 套件
-  '/tmp'                                               // Vercel 冷啟動備援
-];
-const BIN_NAME = process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp';
-
-function findBinary() {
-  for (const dir of BIN_DIRS) {
-    const p = path.join(dir, BIN_NAME);
-    if (existsSync(p)) return p;
-  }
-  return null;
-}
-
-async function downloadBinary() {
-  const targetDir = process.env.VERCEL ? '/tmp' : BIN_DIRS[0];
-  const targetPath = path.join(targetDir, BIN_NAME);
-  await mkdir(targetDir, { recursive: true });
-  const url = `https://github.com/yt-dlp/yt-dlp/releases/latest/download/${BIN_NAME}`;
-  const resp = await fetch(url);
-  if (!resp.ok) throw new Error(`下載 yt-dlp 失敗：HTTP ${resp.status}`);
-  await pipeline(resp.body, createWriteStream(targetPath));
-  await chmod(targetPath, 0o755);
-  return targetPath;
-}
-
-// 確保二進位可用，回傳完整路徑（或 bare name 讓 execFile 搜 PATH）
-async function ensureBinary() {
-  const found = findBinary();
-  if (found) return found;
-  // Vercel：下載到 /tmp
-  if (process.env.VERCEL) return downloadBinary();
-  // 本機讓 execFile 搜 PATH（pip install 的 yt-dlp）
-  return BIN_NAME;
-}
 
 export const name = 'youtube';
 
@@ -81,11 +36,9 @@ export function extractVideoId(url) {
   try {
     const parsed = new URL(url);
     if (parsed.hostname === 'youtu.be') return parsed.pathname.slice(1).split('/')[0] || null;
-    // Handle /shorts/VIDEO_ID pattern
     const shortsMatch = parsed.pathname.match(/\/shorts\/([a-zA-Z0-9_-]{11})/);
     if (shortsMatch) return shortsMatch[1];
-    const v = parsed.searchParams.get('v');
-    return v || null;
+    return parsed.searchParams.get('v') || null;
   } catch { return null; }
 }
 
@@ -194,44 +147,35 @@ export async function resolveShare(inputText, options) {
     };
   }
 
-  // Step 2: 若頁面解析沒拿到影片網址，用 yt-dlp 提取
+  // Step 2: 若頁面解析沒拿到影片網址，用 @distube/ytdl-core 提取
   if (!result.videoUrl) {
-    let binPath;
     try {
-      binPath = await ensureBinary();
-      const info = await new Promise((resolve, reject) => {
-        execFile(binPath, [
-          input.toString(),
-          '-j', '--no-playlist',
-          '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
-        ], {
-          timeout: 30_000,
-          maxBuffer: 50 * 1024 * 1024,
-          windowsHide: true
-        }, (err, stdout) => {
-          if (err) { reject(new Error(`yt-dlp 失敗：${err.message}`)); return; }
-          try { resolve(JSON.parse(stdout)); }
-          catch { reject(new Error('yt-dlp 輸出無效')); }
-        });
+      const info = await ytdl.getInfo(input.toString(), {
+        requestOptions: {
+          headers: {
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/134.0 Safari/537.36',
+            'accept-language': 'en-US,en;q=0.9'
+          }
+        }
       });
 
       const allFormats = info.formats || [];
-      const best = allFormats
-        .filter((f) => f.url || f.manifest_url || f.fragment_base_url)
-        .sort((a, b) => (b.height || 0) - (a.height || 0))[0];
-      result.videoUrl = best?.url || best?.manifest_url || best?.fragment_base_url || result.videoUrl;
-      result.title = result.title || info.title || null;
-      result.description = result.description || (info.description || '').slice(0, 5000) || null;
-      result.author = result.author || info.uploader || null;
-      result.cover = result.cover || info.thumbnail || null;
+      // 優先順序：影+音 → 僅影像(最高畫質) → 僅音訊 → 任何有網址的
+      const best = allFormats.filter((f) => f.url && f.hasAudio && f.hasVideo)
+        .sort((a, b) => (b.height || 0) - (a.height || 0))[0]
+        || allFormats.filter((f) => f.url && f.hasVideo)
+          .sort((a, b) => (b.height || 0) - (a.height || 0))[0]
+        || allFormats.filter((f) => f.url && f.hasAudio)
+          .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0]
+        || allFormats.find((f) => f.url);
+
+      result.videoUrl = best?.url || result.videoUrl;
+      result.title = result.title || info.videoDetails?.title || null;
+      result.description = result.description || info.videoDetails?.description?.slice(0, 5000) || null;
+      result.author = result.author || info.videoDetails?.author?.name || null;
+      result.cover = result.cover || info.videoDetails?.thumbnails?.slice(-1)[0]?.url || null;
     } catch (ytErr) {
-      console.error('[youtube] yt-dlp 提取失敗:', ytErr?.message);
-      console.error('[youtube] VERCEL:', process.env.VERCEL);
-      console.error('[youtube] cwd:', process.cwd());
-      for (const d of BIN_DIRS) {
-        const p = path.join(d, BIN_NAME);
-        console.error('[youtube] 路徑:', p, '存在=', existsSync(p));
-      }
+      console.error('[youtube] ytdl 提取失敗:', ytErr?.message);
     }
   }
 
