@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import ytdl from '@distube/ytdl-core';
 import { assertHttpUrl, assertPublicResolution, extractFirstUrl } from '../utils.js';
 
 export const name = 'youtube';
@@ -127,26 +127,6 @@ async function expandAndFetchPage(rawUrl, options) {
   return { html, finalUrl: response.url };
 }
 
-function ytDlpJson(url) {
-  return new Promise((resolve, reject) => {
-    execFile('yt-dlp', ['-j', url, '--no-playlist'], {
-      timeout: 30_000,
-      maxBuffer: 10 * 1024 * 1024,
-      windowsHide: true
-    }, (error, stdout) => {
-      if (error) {
-        reject(new Error(`yt-dlp 執行失敗：${error.message}`));
-        return;
-      }
-      try {
-        resolve(JSON.parse(stdout));
-      } catch {
-        reject(new Error('yt-dlp 輸出不是有效 JSON'));
-      }
-    });
-  });
-}
-
 export async function resolveShare(inputText, options) {
   const extracted = extractFirstUrl(inputText);
   if (!extracted) throw new Error('找不到可解析的網址');
@@ -168,22 +148,35 @@ export async function resolveShare(inputText, options) {
     };
   }
 
-  // Step 2: 若頁面解析沒拿到影片網址，用 yt-dlp 提取
+  // Step 2: 若頁面解析沒拿到影片網址，用 @distube/ytdl-core 提取
   if (!result.videoUrl) {
     try {
-      const ytData = await ytDlpJson(input.toString());
-      const formats = ytData.formats || [];
-      // 優先選同時含視訊和音訊的格式
-      const best = formats
-        .filter((f) => f.url && f.acodec !== 'none' && f.vcodec !== 'none')
-        .sort((a, b) => (b.height || 0) - (a.height || 0))[0];
+      const info = await ytdl.getInfo(input.toString(), {
+        requestOptions: {
+          headers: {
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/134.0 Safari/537.36',
+            'accept-language': 'en-US,en;q=0.9'
+          }
+        }
+      });
+
+      // 依優先順序挑格式：有影+音 → 僅影片(最高畫質) → 任何有網址的
+      const allFormats = info.formats || [];
+      const best = allFormats.filter((f) => f.url && f.hasAudio && f.hasVideo)
+        .sort((a, b) => (b.height || 0) - (a.height || 0))[0]
+        || allFormats.filter((f) => f.url && f.hasVideo)
+          .sort((a, b) => (b.height || 0) - (a.height || 0))[0]
+        || allFormats.filter((f) => f.url && f.hasAudio)
+          .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0]
+        || allFormats.find((f) => f.url);
+
       result.videoUrl = best?.url || result.videoUrl;
-      result.title = result.title || ytData.title || null;
-      result.description = result.description || ytData.description || null;
-      result.author = result.author || ytData.uploader || null;
-      result.cover = result.cover || ytData.thumbnail || null;
+      result.title = result.title || info.videoDetails?.title || null;
+      result.description = result.description || info.videoDetails?.description?.slice(0, 5000) || null;
+      result.author = result.author || info.videoDetails?.author?.name || null;
+      result.cover = result.cover || info.videoDetails?.thumbnails?.slice(-1)[0]?.url || null;
     } catch {
-      // yt-dlp 失敗就保留頁面取得的資料
+      // ytdl-core 失敗就保留頁面取得的資料
     }
   }
 
