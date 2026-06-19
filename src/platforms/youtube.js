@@ -1,6 +1,14 @@
 import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import ytdl from '@distube/ytdl-core';
 import { assertHttpUrl, assertPublicResolution, extractFirstUrl } from '../utils.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const YTDLP_BIN = process.platform === 'win32'
+  ? path.resolve(__dirname, '../../node_modules/youtube-dl-exec/bin/yt-dlp.exe')
+  : path.resolve(__dirname, '../../node_modules/youtube-dl-exec/bin/yt-dlp');
 
 export const name = 'youtube';
 
@@ -148,19 +156,20 @@ export async function resolveShare(inputText, options) {
     };
   }
 
-  // Step 2: 若頁面解析沒拿到影片網址，嘗試 yt-dlp → @distube/ytdl-core
+  // Step 2: 若頁面解析沒拿到影片網址，用 yt-dlp 提取串流
   if (!result.videoUrl) {
-    // 2a: 系統 yt-dlp（Railway 上可用，完整解碼）
-    try {
-      await new Promise((resolve, reject) => {
-        execFile('yt-dlp', [
-          input.toString(), '-j', '--no-playlist',
-          '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
-        ], { timeout: 30_000, maxBuffer: 50 * 1024 * 1024 }, (err, stdout) => {
-          if (err) { reject(err); return; }
-          try { resolve(JSON.parse(stdout)); } catch { reject(new Error('JSON parse error')); }
+    // 2a: youtube-dl-exec 內建的 yt-dlp 二進位
+    if (existsSync(YTDLP_BIN)) {
+      try {
+        const info = await new Promise((resolve, reject) => {
+          execFile(YTDLP_BIN, [
+            input.toString(), '-j', '--no-playlist',
+            '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
+          ], { timeout: 30_000, maxBuffer: 50 * 1024 * 1024 }, (err, stdout) => {
+            if (err) { reject(err); return; }
+            try { resolve(JSON.parse(stdout)); } catch { reject(new Error('JSON parse error')); }
+          });
         });
-      }).then((info) => {
         const allFormats = info.formats || [];
         const best = allFormats.filter((f) => f.url)
           .sort((a, b) => (b.height || 0) - (a.height || 0))[0];
@@ -171,10 +180,10 @@ export async function resolveShare(inputText, options) {
           result.author = result.author || info.uploader || null;
           result.cover = result.cover || info.thumbnail || null;
         }
-      });
-    } catch { /* yt-dlp 不可用，繼續下一種 */ }
+      } catch { /* yt-dlp binary 執行失敗 */ }
+    }
 
-    // 2b: @distube/ytdl-core（純 JS，無外部依賴）
+    // 2b: @distube/ytdl-core（純 JS 備援）
     if (!result.videoUrl) {
       try {
         let info;
