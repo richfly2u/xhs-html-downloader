@@ -71,7 +71,18 @@ export default async function handler(req, res) {
             size: null,
             contentType: null
           }
-        : null;
+        : data.type === 'video' && data.platform === 'youtube'
+          ? {
+              kind: 'video',
+              directUrl: data.videoUrl || data.sourceUrl,
+              previewUrl: data.cover || data.sourceUrl,
+              downloadUrl: data.videoUrl || data.sourceUrl,
+              filename: `${baseName}.mp4`,
+              bytes: null,
+              size: null,
+              contentType: null
+            }
+          : null;
 
     const images = data.images.map((url, index) => ({
       kind: 'image',

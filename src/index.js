@@ -135,7 +135,15 @@ app.post('/api/parse', parseLimiter, async (req, res) => {
       bytes: null,
       size: null,
       contentType: null
-    } : null);
+    } : (data.type === 'video' && data.platform === 'youtube' ? {
+      kind: 'video',
+      directUrl: data.videoUrl || data.sourceUrl,
+      previewUrl: data.cover || data.sourceUrl,
+      downloadUrl: data.videoUrl || data.sourceUrl,
+      bytes: null,
+      size: null,
+      contentType: null
+    } : null));
 
     const images = data.images.map((url, index) => ({
       kind: 'image',
