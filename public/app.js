@@ -361,7 +361,7 @@ function renderResult(data) {
           const matched = fmt.height
             ? freshFormats.find(f => f.height === fmt.height)
             : freshFormats[0];
-          const targetUrl = matched?.url || payload.data.videoUrl || payload.data.video?.directUrl;
+          const targetUrl = matched?.url || payload.data.videoUrl;
           if (targetUrl) {
             window.open(targetUrl, '_blank', 'noopener,noreferrer');
           } else {

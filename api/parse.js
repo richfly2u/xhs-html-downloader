@@ -74,9 +74,9 @@ export default async function handler(req, res) {
         : data.type === 'video' && data.platform === 'youtube'
           ? {
               kind: 'video',
-              directUrl: data.videoUrl || data.sourceUrl,
+              directUrl: data.videoUrl,
               previewUrl: data.cover || data.sourceUrl,
-              downloadUrl: data.videoUrl || data.sourceUrl,
+              downloadUrl: data.videoUrl,
               filename: `${baseName}.mp4`,
               bytes: null,
               size: null,

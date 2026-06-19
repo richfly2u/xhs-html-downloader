@@ -137,9 +137,9 @@ app.post('/api/parse', parseLimiter, async (req, res) => {
       contentType: null
     } : (data.type === 'video' && data.platform === 'youtube' ? {
       kind: 'video',
-      directUrl: data.videoUrl || data.sourceUrl,
+      directUrl: data.videoUrl,
       previewUrl: data.cover || data.sourceUrl,
-      downloadUrl: data.videoUrl || data.sourceUrl,
+      downloadUrl: data.videoUrl,
       bytes: null,
       size: null,
       contentType: null
