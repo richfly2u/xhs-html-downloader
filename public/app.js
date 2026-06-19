@@ -343,14 +343,29 @@ function renderResult(data) {
         btn.textContent = '取得中…';
         selectedFormat = fmt;
         try {
-          // Call fresh URL endpoint to get a non-expired download link
-          const videoUrl = resultData?.sourceUrl || resultData?.video?.directUrl || input.value.trim();
-          const resp = await fetch(`/api/yt-fresh?url=${encodeURIComponent(videoUrl)}&q=${fmt.height || ''}`);
-          const data = await resp.json();
-          if (data.success && data.url) {
-            window.open(data.url, '_blank', 'noopener,noreferrer');
+          // Re-parse to get a fresh CDN URL (YouTube URLs expire within minutes)
+          const videoUrl = input.value.trim() || resultData?.sourceUrl;
+          if (!videoUrl) { showToast('請重新貼上 YouTube 連結'); return; }
+          const resp = await fetch('/api/parse', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ text: videoUrl })
+          });
+          const payload = await resp.json();
+          if (!payload.success || !payload.data) {
+            showToast('重新解析失敗，請稍後再試');
+            return;
+          }
+          // Find matching format by height
+          const freshFormats = payload.data.formats || [];
+          const matched = fmt.height
+            ? freshFormats.find(f => f.height === fmt.height)
+            : freshFormats[0];
+          const targetUrl = matched?.url || payload.data.videoUrl || payload.data.video?.directUrl;
+          if (targetUrl) {
+            window.open(targetUrl, '_blank', 'noopener,noreferrer');
           } else {
-            showToast('無法取得下載連結，請稍後再試');
+            showToast('此畫質暫無可用連結，請嘗試其他畫質');
           }
         } catch {
           showToast('請求失敗，請稍後再試');
