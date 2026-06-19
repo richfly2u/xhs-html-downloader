@@ -1,11 +1,9 @@
 import * as xiaohongshu from './xiaohongshu.js';
 import * as douyin from './douyin.js';
 import * as tiktok from './tiktok.js';
+import * as youtube from './youtube.js';
 
-// Platform modules — import now, implement later
-const youtube = null;
-
-const platforms = [xiaohongshu, douyin, tiktok, youtube].filter(Boolean);
+const platforms = [xiaohongshu, douyin, tiktok, youtube];
 
 /**
  * Detect platform by hostname.
