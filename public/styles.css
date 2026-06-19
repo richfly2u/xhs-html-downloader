@@ -167,6 +167,9 @@ textarea::placeholder { color: color-mix(in srgb, var(--muted) 72%, transparent)
 .how-card p { margin: 7px 0 0; color: var(--muted); font-size: 13px; line-height: 1.7; }
 
 footer { width: min(calc(100% - 36px), var(--max)); margin: 0 auto; padding: 0 0 38px; color: var(--muted); text-align: center; font-size: 11px; line-height: 1.7; }
+footer p { margin: 4px 0; }
+.version-info { font-size: 10px; opacity: 0.6; }
+.toast { position: fixed; z-index: 50; left: 50%; bottom: 26px; transform: translate(-50%, 20px); min-width: 160px; max-width: calc(100% - 40px); padding: 12px 17px; border-radius: 13px; background: rgba(31,26,28,.92); color: #fff; box-shadow: 0 16px 44px rgba(0,0,0,.22); font-size: 13px; text-align: center; opacity: 0; pointer-events: none; transition: opacity .22s, transform .22s; backdrop-filter: blur(12px); }
 .toast { position: fixed; z-index: 50; left: 50%; bottom: 26px; transform: translate(-50%, 20px); min-width: 160px; max-width: calc(100% - 40px); padding: 12px 17px; border-radius: 13px; background: rgba(31,26,28,.92); color: #fff; box-shadow: 0 16px 44px rgba(0,0,0,.22); font-size: 13px; text-align: center; opacity: 0; pointer-events: none; transition: opacity .22s, transform .22s; backdrop-filter: blur(12px); }
 .toast.is-visible { opacity: 1; transform: translate(-50%, 0); }
 .is-hidden { display: none !important; }

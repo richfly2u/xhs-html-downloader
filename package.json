@@ -1,6 +1,6 @@
 {
   "name": "xhs-html-downloader",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "private": true,
   "description": "Vercel-ready HTML frontend for resolving public Xiaohongshu media and automatically analyzing captions, with optional AI transcription.",
   "type": "module",

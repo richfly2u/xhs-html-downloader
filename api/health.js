@@ -10,7 +10,7 @@ export default function handler(req, res) {
   return res.status(200).json({
     ok: true,
     service: 'xhs-html-downloader',
-    version: '0.4.5',
+    version: '0.4.6',
     runtime: 'vercel-node-function',
     aiConfigured: Boolean(provider),
     aiProvider: provider,
