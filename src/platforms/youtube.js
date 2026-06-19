@@ -10,6 +10,38 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const YTDLP_BIN = path.resolve(__dirname, '../../node_modules/.bin/yt-dlp'
   + (process.platform === 'win32' ? '.exe' : ''));
 
+// 代理輪換清單（null = 直接連線，優先使用）
+const PROXY_LIST = [
+  null,
+  'socks5://178.62.78.86:1080',
+  'socks5://51.75.147.219:16379',
+  'socks5://168.119.170.99:1080',
+  'socks5://141.94.106.94:1080',
+];
+
+/** 用 yt-dlp 提取 YouTube 資訊，自動嘗試多個代理 */
+async function ytDlpWithFallback(url, options = {}) {
+  const errors = [];
+  for (const proxy of PROXY_LIST) {
+    try {
+      const args = [url, '-j', '--no-playlist',
+        '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'];
+      if (proxy) args.push('--proxy', proxy);
+      return await new Promise((resolve, reject) => {
+        execFile(YTDLP_BIN, args, {
+          timeout: 30_000, maxBuffer: 50 * 1024 * 1024
+        }, (err, stdout) => {
+          if (err) { reject(new Error(proxy ? `代理(${proxy.slice(0,20)}...): ${err.message}` : err.message)); return; }
+          try { resolve(JSON.parse(stdout)); } catch { reject(new Error('JSON parse error')); }
+        });
+      });
+    } catch (e) {
+      errors.push(e.message);
+    }
+  }
+  throw new Error('yt-dlp 所有代理皆失敗: ' + errors.join('; '));
+}
+
 export const name = 'youtube';
 
 export const hosts = new Set([
@@ -255,18 +287,10 @@ export async function resolveShare(inputText, options) {
     console.error('[youtube] 頁面解析失敗:', pageErr?.message);
   }
 
-  // Step 3: yt-dlp 二進位
+  // Step 3: yt-dlp 二進位（含代理輪換）
   if (!result.videoUrl && existsSync(YTDLP_BIN)) {
       try {
-        const info = await new Promise((resolve, reject) => {
-          execFile(YTDLP_BIN, [
-            input.toString(), '-j', '--no-playlist',
-            '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
-          ], { timeout: 30_000, maxBuffer: 50 * 1024 * 1024 }, (err, stdout) => {
-            if (err) { reject(err); return; }
-            try { resolve(JSON.parse(stdout)); } catch { reject(new Error('JSON parse error')); }
-          });
-        });
+        const info = await ytDlpWithFallback(input.toString());
         const allFormats = info.formats || [];
         const best = allFormats.filter((f) => f.url)
           .sort((a, b) => (b.height || 0) - (a.height || 0))[0];
@@ -298,10 +322,10 @@ export async function resolveShare(inputText, options) {
             }
           }
         }
-      } catch { /* yt-dlp binary 執行失敗 */ }
+      } catch (ytdlpErr) { console.error('[youtube] yt-dlp 失敗:', ytdlpErr?.message); }
     }
 
-    // 2b: @distube/ytdl-core（純 JS 備援）
+    // Step 4: @distube/ytdl-core（純 JS 備援）
     if (!result.videoUrl) {
       try {
         let info;
