@@ -20,6 +20,7 @@ function findYtDlp() {
   return null;
 }
 const YTDLP_BIN = findYtDlp();
+const YTDLP_AVAILABLE = YTDLP_BIN !== null;
 
 // yt-dlp 嘗試策略：不同 client 類型 → 代理輪換
 const STRATEGIES = [
@@ -30,13 +31,14 @@ const STRATEGIES = [
 ];
 
 async function ytDlpWithFallback(url) {
+  const bin = YTDLP_BIN;
   const errors = [];
   const common = [url, '-j', '--no-playlist',
     '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'];
   for (const extra of STRATEGIES) {
     try {
       const result = await new Promise((resolve, reject) => {
-        execFile(YTDLP_BIN, [...common, ...extra], {
+        execFile(bin, [...common, ...extra], {
           timeout: 30_000, maxBuffer: 50 * 1024 * 1024
         }, (err, stdout) => {
           if (err) { reject(err); return; }
@@ -297,8 +299,8 @@ export async function resolveShare(inputText, options) {
     console.error('[youtube] 頁面解析失敗:', pageErr?.message);
   }
 
-  // Step 3: yt-dlp 二進位（含代理輪換）
-  if (!result.videoUrl && existsSync(YTDLP_BIN)) {
+  // Step 3: yt-dlp 二進位（含 client 策略輪換）
+  if (!result.videoUrl && YTDLP_AVAILABLE) {
       try {
         const info = await ytDlpWithFallback(input.toString());
         const allFormats = info.formats || [];
