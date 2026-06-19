@@ -11,7 +11,7 @@ import { probeMedia, resolvePublicShare } from './resolver.js';
 import { analyzeCopy } from './analyzer.js';
 import { fetchThumbnail } from './thumbnail.js';
 import { extractVideoId } from './platforms/youtube.js';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import {
   assertHttpUrl,
@@ -34,6 +34,10 @@ const maxHtmlBytes = Number(process.env.MAX_HTML_BYTES || 4 * 1024 * 1024);
 const maxMediaBytes = Number(process.env.MAX_MEDIA_BYTES || 300 * 1024 * 1024);
 const mediaProxyDefault = process.env.VERCEL ? 'false' : 'true';
 const mediaProxyEnabled = String(process.env.ENABLE_MEDIA_PROXY ?? mediaProxyDefault).toLowerCase() === 'true';
+
+// yt-dlp 二進位路徑（供 /api/media 代理 YouTube 串流用）
+const __ytdlpBin = path.resolve(__dirname, '../node_modules/.bin/yt-dlp' + (process.platform === 'win32' ? '.exe' : ''));
+const YTDLP_BIN = existsSync(__ytdlpBin) ? __ytdlpBin : 'yt-dlp';
 
 if (process.env.VERCEL || process.env.RAILWAY_ENVIRONMENT || String(process.env.TRUST_PROXY || 'false').toLowerCase() === 'true') {
   app.set('trust proxy', 1);
@@ -79,11 +83,6 @@ function aiAccessProtected() {
 
 function mediaProxyUrl(req, directUrl, { download = false, filename = 'media' } = {}) {
   if (!mediaProxyEnabled || !directUrl) return null;
-  // googlevideo.com 串流網址綁定 IP，走代理會 403，直接傳給前端
-  try {
-    const parsed = new URL(directUrl);
-    if (parsed.hostname.endsWith('.googlevideo.com')) return directUrl;
-  } catch { /* 忽略無效網址 */ }
   const query = new URLSearchParams({ url: directUrl });
   if (download) query.set('download', '1');
   if (filename) query.set('name', filename);
@@ -220,10 +219,42 @@ app.get('/api/media', mediaLimiter, async (req, res) => {
     const rawUrl = String(req.query.url || '');
     const url = assertHttpUrl(rawUrl);
     if (!isMediaHost(url.hostname)) {
-      return res.status(400).json({ success: false, error: '只允許代理小紅書 CDN 媒體' });
+      return res.status(400).json({ success: false, error: '只允許代理 CDN 媒體' });
     }
     await assertPublicResolution(url.hostname);
 
+    const requestedName = safeFilename(String(req.query.name || 'media'), 'media');
+    const disposition = String(req.query.download || '') === '1' ? 'attachment' : 'inline';
+    const extension = requestedName.includes('.') ? requestedName.split('.').pop() : 'mp4';
+
+    // googlevideo.com 串流綁定 IP，用 yt-dlp 下載而非直接 fetch
+    if (url.hostname.endsWith('.googlevideo.com')) {
+      const finalName = requestedName.includes('.') ? requestedName : `${requestedName}.mp4`;
+      res.setHeader('Content-Disposition', `${disposition}; filename*=UTF-8''${encodeURIComponent(finalName)}`);
+      res.setHeader('Content-Type', 'video/mp4');
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      try {
+        const ytProc = spawn(YTDLP_BIN, [rawUrl, '-o', '-', '-f', 'best'], {
+          windowsHide: true
+        });
+        res.on('close', () => { try { ytProc.kill(); } catch {} });
+        const timeoutTimer = setTimeout(() => ytProc.kill(), mediaTimeoutMs);
+        ytProc.on('close', () => clearTimeout(timeoutTimer));
+        ytProc.stdout.pipe(res);
+        await new Promise((resolve, reject) => {
+          ytProc.on('error', reject);
+          ytProc.on('close', (code) => {
+            if (code === 0 || code === null) resolve();
+            else reject(new Error(`yt-dlp 退出碼 ${code}`));
+          });
+        });
+      } catch (ytErr) {
+        if (!res.headersSent) res.status(502).json({ success: false, error: `下載失敗：${ytErr.message}` });
+      }
+      return;
+    }
+
+    // 一般 CDN 代理（XHS 等）
     const headers = {
       'user-agent': req.get('user-agent') || 'Mozilla/5.0',
       accept: 'video/mp4,image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
@@ -240,13 +271,12 @@ app.get('/api/media', mediaLimiter, async (req, res) => {
       return res.status(502).json({ success: false, error: `上游媒體回應錯誤：HTTP ${upstream.status}` });
     }
 
-    // 檢查 redirect 後仍在 xhscdn.com
     if (upstream.url) {
       try {
         const effectiveHost = new URL(upstream.url).hostname;
         if (!isMediaHost(effectiveHost)) {
           await upstream.body.cancel();
-          return res.status(400).json({ success: false, error: '重新導向到非小紅書 CDN 位址，已拒絕' });
+          return res.status(400).json({ success: false, error: '重新導向到非 CDN 位址，已拒絕' });
         }
       } catch {
         await upstream.body.cancel();
@@ -272,17 +302,14 @@ app.get('/api/media', mediaLimiter, async (req, res) => {
       if (value) res.setHeader(header, value);
     }
 
-    const extension = contentType.startsWith('video/') ? 'mp4' :
+    const ext = contentType.startsWith('video/') ? 'mp4' :
       contentType.includes('png') ? 'png' :
       contentType.includes('webp') ? 'webp' :
       contentType.includes('avif') ? 'avif' : 'jpg';
-    const requestedName = safeFilename(String(req.query.name || `media.${extension}`), `media.${extension}`);
-    const finalName = requestedName.includes('.') ? requestedName : `${requestedName}.${extension}`;
-    const disposition = String(req.query.download || '') === '1' ? 'attachment' : 'inline';
-    res.setHeader('Content-Disposition', `${disposition}; filename*=UTF-8''${encodeURIComponent(finalName)}`);
+    const fn = requestedName.includes('.') ? requestedName : `${requestedName}.${ext}`;
+    res.setHeader('Content-Disposition', `${disposition}; filename*=UTF-8''${encodeURIComponent(fn)}`);
     res.setHeader('Cache-Control', 'public, max-age=3600');
 
-    // 串流過程中累計 byte，超過上限即中止
     let totalBytes = 0;
     const byteLimitTransform = new Transform({
       transform(chunk, encoding, callback) {
