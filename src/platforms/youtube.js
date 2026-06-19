@@ -7,8 +7,19 @@ import { Innertube } from 'youtubei.js';
 import { assertHttpUrl, assertPublicResolution, extractFirstUrl } from '../utils.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const YTDLP_BIN = path.resolve(__dirname, '../../node_modules/.bin/yt-dlp'
-  + (process.platform === 'win32' ? '.exe' : ''));
+// 依優先順序找 yt-dlp 二進位
+function findYtDlp() {
+  const paths = [
+    path.resolve(__dirname, '../../node_modules/.bin/yt-dlp' + (process.platform === 'win32' ? '.exe' : '')),
+    path.resolve(__dirname, '../../node_modules/youtube-dl-exec/bin/yt-dlp' + (process.platform === 'win32' ? '.exe' : '')),
+    'yt-dlp',  // PATH 中的系統安裝（nixpacks / pipx）
+  ];
+  for (const p of paths) {
+    if (p === 'yt-dlp' || existsSync(p)) return p;
+  }
+  return null;
+}
+const YTDLP_BIN = findYtDlp();
 
 // 代理輪換清單（null = 直接連線，優先使用）
 const PROXY_LIST = [
