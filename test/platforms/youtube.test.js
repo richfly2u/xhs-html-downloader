@@ -18,6 +18,7 @@ test('youtube: isMediaHost checks CDN', () => {
 test('youtube: extractVideoId works', () => {
   assert.equal(extractVideoId('https://www.youtube.com/watch?v=dQw4w9WgXcQ'), 'dQw4w9WgXcQ');
   assert.equal(extractVideoId('https://youtu.be/dQw4w9WgXcQ'), 'dQw4w9WgXcQ');
+  assert.equal(extractVideoId('https://www.youtube.com/shorts/abc123DEF45'), 'abc123DEF45');
   assert.equal(extractVideoId('https://www.youtube.com/watch?v='), null);
 });
 

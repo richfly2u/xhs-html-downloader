@@ -35,6 +35,9 @@ export function extractVideoId(url) {
   try {
     const parsed = new URL(url);
     if (parsed.hostname === 'youtu.be') return parsed.pathname.slice(1).split('/')[0] || null;
+    // Handle /shorts/VIDEO_ID pattern
+    const shortsMatch = parsed.pathname.match(/\/shorts\/([a-zA-Z0-9_-]{11})/);
+    if (shortsMatch) return shortsMatch[1];
     const v = parsed.searchParams.get('v');
     return v || null;
   } catch { return null; }
