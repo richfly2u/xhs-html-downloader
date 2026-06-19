@@ -350,7 +350,6 @@ export async function resolveShare(inputText, options) {
         }
       } catch { /* ytdl-core 也失敗 */ }
     }
-  }
 
   return result;
 }
