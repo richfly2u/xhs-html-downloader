@@ -340,14 +340,9 @@ function renderResult(data) {
         formatList.querySelectorAll('.format-btn').forEach((b) => b.classList.remove('is-active'));
         btn.classList.add('is-active');
         selectedFormat = fmt;
-        // Update video player source if video URL changed
-        if (fmt.url && isVideo) {
-          videoPlayer.src = fmt.url;
-          videoPlayer.load();
-          videoPlayer.play().catch(() => {});
-        }
-        // Update download button
-        configureDownloadLink(downloadButton, fmt.url, '開啟影片');
+        // 僅更新下載按鈕與複製連結，不修改 video player src
+        // (YouTube CDN URL 需直接下載，無法在瀏覽器內嵌播放)
+        configureDownloadLink(downloadButton, fmt.url, '開啟影片下載');
         copyLinkButton.dataset.url = fmt.url;
       });
       list.appendChild(btn);
@@ -364,7 +359,19 @@ function renderResult(data) {
   }
 
   if (isVideo) {
-    videoPlayer.src = data.video.previewUrl || data.video.directUrl;
+    // YouTube CDN URLs don't play in browser - show poster only
+    if (data.platform === 'youtube') {
+      videoPlayer.removeAttribute('src');
+      videoPlayer.load();
+      // Show a message overlay on the video element
+      const msg = document.createElement('div');
+      msg.className = 'yt-overlay-msg';
+      msg.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7L8 5Z"/></svg> 點下方按鈕下載影片';
+      mediaPanel.querySelector('.yt-overlay-msg')?.remove();
+      mediaPanel.appendChild(msg);
+    } else {
+      videoPlayer.src = data.video.previewUrl || data.video.directUrl;
+    }
     if (data.cover) videoPlayer.poster = data.cover;
     videoPlayer.classList.remove('is-hidden');
     configureDownloadLink(downloadButton, data.video.downloadUrl || data.video.directUrl, '開啟影片下載');

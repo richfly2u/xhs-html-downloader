@@ -198,6 +198,26 @@ textarea::placeholder { color: color-mix(in srgb, var(--muted) 72%, transparent)
   opacity: .65;
 }
 
+.yt-overlay-msg {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: rgba(255,255,255,.7);
+  font-size: 14px;
+  font-weight: 700;
+  pointer-events: none;
+  z-index: 1;
+}
+.yt-overlay-msg svg {
+  width: 28px;
+  fill: none;
+  stroke: currentColor;
+}
+
 .history-section { margin-top: 42px; padding: 24px; border-radius: var(--radius-lg); }
 .section-title-row.compact { margin: 0 0 14px; }
 .history-list { display: grid; gap: 8px; }
