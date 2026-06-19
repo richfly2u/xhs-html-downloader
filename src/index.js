@@ -120,7 +120,7 @@ app.post('/api/parse', parseLimiter, async (req, res) => {
       bytes: probe.bytes,
       size: formatBytes(probe.bytes),
       contentType: probe.contentType || 'video/mp4'
-    } : (data.type === 'video' ? {
+    } : (data.type === 'video' && data.platform !== 'youtube' ? {
       kind: 'video',
       directUrl: data.sourceUrl,
       previewUrl: data.sourceUrl,

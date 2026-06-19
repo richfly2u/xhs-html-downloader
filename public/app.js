@@ -340,10 +340,10 @@ function renderResult(data) {
         formatList.querySelectorAll('.format-btn').forEach((b) => b.classList.remove('is-active'));
         btn.classList.add('is-active');
         selectedFormat = fmt;
-        // 僅更新下載按鈕與複製連結，不修改 video player src
-        // (YouTube CDN URL 需直接下載，無法在瀏覽器內嵌播放)
-        configureDownloadLink(downloadButton, fmt.url, '開啟影片下載');
-        copyLinkButton.dataset.url = fmt.url;
+        if (fmt.url) {
+          // Open format URL directly in new tab
+          window.open(fmt.url, '_blank', 'noopener,noreferrer');
+        }
       });
       list.appendChild(btn);
     }
