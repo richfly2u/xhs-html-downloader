@@ -1,4 +1,4 @@
-import ytdl from '@distube/ytdl-core';
+import youtubedl from 'youtube-dl-exec';
 import { assertHttpUrl, assertPublicResolution, extractFirstUrl } from '../utils.js';
 
 export const name = 'youtube';
@@ -148,35 +148,27 @@ export async function resolveShare(inputText, options) {
     };
   }
 
-  // Step 2: 若頁面解析沒拿到影片網址，用 @distube/ytdl-core 提取
+  // Step 2: 若頁面解析沒拿到影片網址，用 youtube-dl-exec (內建完整 yt-dlp) 提取
   if (!result.videoUrl) {
     try {
-      const info = await ytdl.getInfo(input.toString(), {
-        requestOptions: {
-          headers: {
-            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/134.0 Safari/537.36',
-            'accept-language': 'en-US,en;q=0.9'
-          }
-        }
+      const info = await youtubedl(input.toString(), {
+        dumpJson: true,
+        noPlaylist: true,
+        format: 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
       });
 
-      // 依優先順序挑格式：有影+音 → 僅影片(最高畫質) → 任何有網址的
       const allFormats = info.formats || [];
-      const best = allFormats.filter((f) => f.url && f.hasAudio && f.hasVideo)
-        .sort((a, b) => (b.height || 0) - (a.height || 0))[0]
-        || allFormats.filter((f) => f.url && f.hasVideo)
-          .sort((a, b) => (b.height || 0) - (a.height || 0))[0]
-        || allFormats.filter((f) => f.url && f.hasAudio)
-          .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0]
-        || allFormats.find((f) => f.url);
-
+      // 挑選有 URL 的最高畫質格式
+      const best = allFormats
+        .filter((f) => f.url)
+        .sort((a, b) => (b.height || 0) - (a.height || 0))[0];
       result.videoUrl = best?.url || result.videoUrl;
-      result.title = result.title || info.videoDetails?.title || null;
-      result.description = result.description || info.videoDetails?.description?.slice(0, 5000) || null;
-      result.author = result.author || info.videoDetails?.author?.name || null;
-      result.cover = result.cover || info.videoDetails?.thumbnails?.slice(-1)[0]?.url || null;
+      result.title = result.title || info.title || null;
+      result.description = result.description || (info.description || '').slice(0, 5000) || null;
+      result.author = result.author || info.uploader || null;
+      result.cover = result.cover || info.thumbnail || null;
     } catch {
-      // ytdl-core 失敗就保留頁面取得的資料
+      // youtube-dl-exec 失敗就保留頁面取得的資料
     }
   }
 
