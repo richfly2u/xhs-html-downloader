@@ -20,8 +20,7 @@ function findBinary() {
     const p = path.join(dir, BIN_NAME);
     if (existsSync(p)) return p;
   }
-  // Fallback to PATH（pip 安裝的 yt-dlp、或系統路徑）
-  return BIN_NAME; // execFile 會搜尋 PATH
+  return null;
 }
 
 async function downloadBinary() {
@@ -36,9 +35,14 @@ async function downloadBinary() {
   return targetPath;
 }
 
-// 確保二進位可用，回傳路徑
+// 確保二進位可用，回傳完整路徑（或 bare name 讓 execFile 搜 PATH）
 async function ensureBinary() {
-  return findBinary() || downloadBinary();
+  const found = findBinary();
+  if (found) return found;
+  // Vercel：下載到 /tmp
+  if (process.env.VERCEL) return downloadBinary();
+  // 本機讓 execFile 搜 PATH（pip install 的 yt-dlp）
+  return BIN_NAME;
 }
 
 export const name = 'youtube';
