@@ -32,7 +32,7 @@ const maxMediaBytes = Number(process.env.MAX_MEDIA_BYTES || 300 * 1024 * 1024);
 const mediaProxyDefault = process.env.VERCEL ? 'false' : 'true';
 const mediaProxyEnabled = String(process.env.ENABLE_MEDIA_PROXY ?? mediaProxyDefault).toLowerCase() === 'true';
 
-if (process.env.VERCEL || String(process.env.TRUST_PROXY || 'false').toLowerCase() === 'true') {
+if (process.env.VERCEL || process.env.RAILWAY_ENVIRONMENT || String(process.env.TRUST_PROXY || 'false').toLowerCase() === 'true') {
   app.set('trust proxy', 1);
 }
 
