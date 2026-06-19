@@ -1,4 +1,5 @@
-import { assertHttpUrl, assertPublicResolution, isMediaHost } from './utils.js';
+import { assertHttpUrl, assertPublicResolution } from './utils.js';
+import { isMediaHost } from './platforms/index.js';
 
 const DEFAULT_HEADERS = {
   'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/134.0 Safari/537.36',

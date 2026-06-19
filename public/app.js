@@ -329,6 +329,11 @@ function renderResult(data) {
 
   $('mediaType').textContent = isVideo ? '影片' : '圖片筆記';
   $('parserLabel').textContent = parserName(data.parser);
+  const platformLabel = $('platformLabel');
+  if (platformLabel) {
+    platformLabel.textContent = data.platform || '';
+    platformLabel.classList.toggle('is-hidden', !data.platform);
+  }
   $('resultTitle').textContent = data.title || '未命名作品';
   $('formatValue').textContent = data.format || (isVideo ? 'MP4' : '圖片');
   $('sizeValue').textContent = data.size || '未提供';

@@ -16,10 +16,10 @@ import {
   codesEqual,
   formatBytes,
   getProvidedCode,
-  isMediaHost,
   safeFilename,
   secureDigest
 } from './utils.js';
+import { isMediaHost } from './platforms/index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(__dirname, '../public');
