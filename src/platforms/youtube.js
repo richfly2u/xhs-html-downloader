@@ -196,8 +196,9 @@ export async function resolveShare(inputText, options) {
 
   // Step 2: 若頁面解析沒拿到影片網址，用 yt-dlp 提取
   if (!result.videoUrl) {
+    let binPath;
     try {
-      const binPath = await ensureBinary();
+      binPath = await ensureBinary();
       const info = await new Promise((resolve, reject) => {
         execFile(binPath, [
           input.toString(),
@@ -225,6 +226,12 @@ export async function resolveShare(inputText, options) {
       result.cover = result.cover || info.thumbnail || null;
     } catch (ytErr) {
       console.error('[youtube] yt-dlp 提取失敗:', ytErr?.message);
+      console.error('[youtube] VERCEL:', process.env.VERCEL);
+      console.error('[youtube] cwd:', process.cwd());
+      for (const d of BIN_DIRS) {
+        const p = path.join(d, BIN_NAME);
+        console.error('[youtube] 路徑:', p, '存在=', existsSync(p));
+      }
     }
   }
 
