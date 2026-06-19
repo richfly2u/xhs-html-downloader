@@ -150,32 +150,33 @@ export async function resolveShare(inputText, options) {
   // Step 2: 若頁面解析沒拿到影片網址，用 @distube/ytdl-core 提取
   if (!result.videoUrl) {
     try {
-      const info = await ytdl.getInfo(input.toString(), {
-        requestOptions: {
-          headers: {
-            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/134.0 Safari/537.36',
-            'accept-language': 'en-US,en;q=0.9'
-          }
-        }
-      });
+      // 嘗試不同 client 來繞過 YouTube bot 阻擋
+      let info;
+      for (const client of ['web', 'ios', 'android']) {
+        try {
+          info = await ytdl.getInfo(input.toString(), { clients: [client] });
+          if (info?.formats?.some((f) => f.url)) break;
+        } catch { continue; }
+      }
 
-      const allFormats = info.formats || [];
-      // 優先順序：影+音 → 僅影像(最高畫質) → 僅音訊 → 任何有網址的
-      const best = allFormats.filter((f) => f.url && f.hasAudio && f.hasVideo)
-        .sort((a, b) => (b.height || 0) - (a.height || 0))[0]
-        || allFormats.filter((f) => f.url && f.hasVideo)
+      if (info) {
+        const allFormats = info.formats || [];
+        const best = allFormats.filter((f) => f.url && f.hasAudio && f.hasVideo)
           .sort((a, b) => (b.height || 0) - (a.height || 0))[0]
-        || allFormats.filter((f) => f.url && f.hasAudio)
-          .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0]
-        || allFormats.find((f) => f.url);
+          || allFormats.filter((f) => f.url && f.hasVideo)
+            .sort((a, b) => (b.height || 0) - (a.height || 0))[0]
+          || allFormats.filter((f) => f.url && f.hasAudio)
+            .sort((a, b) => (a.bitrate || 0) - (a.bitrate || 0))[0]
+          || allFormats.find((f) => f.url);
 
-      result.videoUrl = best?.url || result.videoUrl;
-      result.title = result.title || info.videoDetails?.title || null;
-      result.description = result.description || info.videoDetails?.description?.slice(0, 5000) || null;
-      result.author = result.author || info.videoDetails?.author?.name || null;
-      result.cover = result.cover || info.videoDetails?.thumbnails?.slice(-1)[0]?.url || null;
-    } catch (ytErr) {
-      result._debug = ytErr?.message;
+        result.videoUrl = best?.url || result.videoUrl;
+        result.title = result.title || info.videoDetails?.title || null;
+        result.description = result.description || info.videoDetails?.description?.slice(0, 5000) || null;
+        result.author = result.author || info.videoDetails?.author?.name || null;
+        result.cover = result.cover || info.videoDetails?.thumbnails?.slice(-1)[0]?.url || null;
+      }
+    } catch {
+      // 所有 client 都失敗，保留頁面資料
     }
   }
 
