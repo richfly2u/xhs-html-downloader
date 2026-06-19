@@ -76,6 +76,11 @@ function aiAccessProtected() {
 
 function mediaProxyUrl(req, directUrl, { download = false, filename = 'media' } = {}) {
   if (!mediaProxyEnabled || !directUrl) return null;
+  // googlevideo.com 串流網址綁定 IP，走代理會 403，直接傳給前端
+  try {
+    const parsed = new URL(directUrl);
+    if (parsed.hostname.endsWith('.googlevideo.com')) return directUrl;
+  } catch { /* 忽略無效網址 */ }
   const query = new URLSearchParams({ url: directUrl });
   if (download) query.set('download', '1');
   if (filename) query.set('name', filename);
