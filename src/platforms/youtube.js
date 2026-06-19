@@ -175,7 +175,7 @@ export async function resolveShare(inputText, options) {
       result.author = result.author || info.videoDetails?.author?.name || null;
       result.cover = result.cover || info.videoDetails?.thumbnails?.slice(-1)[0]?.url || null;
     } catch (ytErr) {
-      console.error('[youtube] ytdl 提取失敗:', ytErr?.message, ytErr?.stack?.slice(0, 500));
+      result._debug = ytErr?.message;
     }
   }
 
