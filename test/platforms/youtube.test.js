@@ -35,4 +35,5 @@ test('youtube: parseWatchPage extracts og metadata', () => {
   assert.equal(result.type, 'video');
   assert.ok(result.cover);
   assert.equal(result.platform, 'youtube');
+  assert.equal(result.images.length, 0);
 });

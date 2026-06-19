@@ -120,7 +120,15 @@ app.post('/api/parse', parseLimiter, async (req, res) => {
       bytes: probe.bytes,
       size: formatBytes(probe.bytes),
       contentType: probe.contentType || 'video/mp4'
-    } : null;
+    } : (data.type === 'video' ? {
+      kind: 'video',
+      directUrl: data.sourceUrl,
+      previewUrl: data.sourceUrl,
+      downloadUrl: data.sourceUrl,
+      bytes: null,
+      size: null,
+      contentType: null
+    } : null);
 
     const images = data.images.map((url, index) => ({
       kind: 'image',

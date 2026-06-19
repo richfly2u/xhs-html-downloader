@@ -102,7 +102,7 @@ export function parseWatchPage(html, finalUrl) {
     sourceUrl: finalUrl, noteId: videoId, title, description, author, cover,
     type: videoId ? 'video' : null,
     videoUrl, alternatives: [],
-    images: cover ? [cover] : [],
+    images: [],
     parser: playerData ? 'initial-state' : 'page-media-scan',
     platform: 'youtube'
   };
