@@ -48,11 +48,10 @@ export function isShareHost(hostname) {
  */
 export function isMediaHost(hostname) {
   if (!hostname) return false;
+  const lower = hostname.toLowerCase();
   return platforms.some((p) => {
-    // Use the platform's own isMediaHost if it exists (for subdomain checks etc.)
-    if (typeof p.isMediaHost === 'function') return p.isMediaHost(hostname);
-    // Fallback: simple Set lookup
-    return p.mediaHosts?.has(hostname.toLowerCase());
+    if (typeof p.isMediaHost === 'function') return p.isMediaHost(lower);
+    return p.mediaHosts?.has(lower);
   });
 }
 
