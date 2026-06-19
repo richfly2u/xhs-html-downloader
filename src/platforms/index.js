@@ -2,8 +2,9 @@ import * as xiaohongshu from './xiaohongshu.js';
 import * as douyin from './douyin.js';
 import * as tiktok from './tiktok.js';
 import * as youtube from './youtube.js';
+import * as facebook from './facebook.js';
 
-const platforms = [xiaohongshu, douyin, tiktok, youtube];
+const platforms = [xiaohongshu, douyin, tiktok, youtube, facebook];
 
 /**
  * Detect platform by hostname.
