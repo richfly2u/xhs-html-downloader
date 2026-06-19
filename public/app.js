@@ -33,6 +33,7 @@ let analysisRequestId = 0;
 const HISTORY_KEY = 'xhs-html-downloader-history-v1';
 const AI_ACCESS_CODE_KEY = 'xhs-html-downloader-ai-access-code';
 let result = null;
+let resultData = null; // raw data from API
 let toastTimer = null;
 
 
@@ -302,15 +303,66 @@ function renderImages(images) {
 
 function renderResult(data) {
   result = data;
+  resultData = data; // store raw data for format picker
   hideError();
   resultSection.classList.remove('is-hidden');
   mediaPlaceholder.classList.add('is-hidden');
   videoPlayer.classList.add('is-hidden');
   imageGrid.classList.add('is-hidden');
+  formatPicker.classList.add('is-hidden');
   videoPlayer.removeAttribute('src');
   videoPlayer.load();
 
   const isVideo = Boolean(data.video);
+  // Build format picker for YouTube
+  if (data.platform === 'youtube' && data.formats?.length > 0) {
+    const list = formatList;
+    list.textContent = '';
+    let selectedFormat = null;
+    for (const fmt of data.formats) {
+      const btn = document.createElement('button');
+      btn.className = 'format-btn';
+      const label = document.createElement('span');
+      label.textContent = fmt.label;
+      btn.appendChild(label);
+      if (fmt.hasVideo) {
+        const meta = document.createElement('span');
+        meta.className = 'fmt-meta';
+        meta.textContent = fmt.hasAudio ? '影音' : '僅影片';
+        btn.appendChild(meta);
+      } else if (fmt.hasAudio) {
+        const meta = document.createElement('span');
+        meta.className = 'fmt-meta';
+        meta.textContent = '僅音訊';
+        btn.appendChild(meta);
+      }
+      btn.addEventListener('click', () => {
+        formatList.querySelectorAll('.format-btn').forEach((b) => b.classList.remove('is-active'));
+        btn.classList.add('is-active');
+        selectedFormat = fmt;
+        // Update video player source if video URL changed
+        if (fmt.url && isVideo) {
+          videoPlayer.src = fmt.url;
+          videoPlayer.load();
+          videoPlayer.play().catch(() => {});
+        }
+        // Update download button
+        configureDownloadLink(downloadButton, fmt.url, '開啟影片');
+        copyLinkButton.dataset.url = fmt.url;
+      });
+      list.appendChild(btn);
+    }
+    // Select the first (highest quality) by default
+    const firstBtn = list.querySelector('.format-btn');
+    if (firstBtn) {
+      firstBtn.classList.add('is-active');
+      selectedFormat = data.formats[0];
+    }
+    formatPicker.classList.remove('is-hidden');
+    // Update size value with format count
+    $('countValue').textContent = `${data.formats.length} 種畫質`;
+  }
+
   if (isVideo) {
     videoPlayer.src = data.video.previewUrl || data.video.directUrl;
     if (data.cover) videoPlayer.poster = data.cover;
@@ -327,6 +379,10 @@ function renderResult(data) {
     copyLinkButton.dataset.url = first?.directUrl || '';
   }
 
+  // 縮圖下載按鈕 (vd6s-style thumbnail download)
+  coverDownloadButton.classList.toggle('is-hidden', !data.cover);
+  coverDownloadButton.dataset.url = data.cover || '';
+
   $('mediaType').textContent = isVideo ? '影片' : '圖片筆記';
   $('parserLabel').textContent = parserName(data.parser);
   const platformLabel = $('platformLabel');
@@ -337,7 +393,9 @@ function renderResult(data) {
   $('resultTitle').textContent = data.title || '未命名作品';
   $('formatValue').textContent = data.format || (isVideo ? 'MP4' : '圖片');
   $('sizeValue').textContent = data.size || '未提供';
-  $('countValue').textContent = isVideo ? `1 部影片${data.alternatives?.length ? ` · ${data.alternatives.length} 個備選` : ''}` : `${data.images?.length || 0} 張圖片`;
+  if (!(data.platform === 'youtube' && data.formats?.length)) {
+    $('countValue').textContent = isVideo ? `1 部影片${data.alternatives?.length ? ` · ${data.alternatives.length} 個備選` : ''}` : `${data.images?.length || 0} 張圖片`;
+  }
 
   const authorLine = $('authorLine');
   if (data.author) {
@@ -608,6 +666,28 @@ clearAiAccessCodeButton.addEventListener('click', () => {
 
 aiAccessCodeInput.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') saveAiAccessCodeButton.click();
+});
+
+// 縮圖下載 (vd6s-inspired)
+coverDownloadButton.addEventListener('click', () => {
+  const url = coverDownloadButton.dataset.url;
+  if (!url) return;
+  const a = document.createElement('a');
+  a.href = url;
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  a.click();
+  showToast('已開啟封面圖片');
+});
+
+// 貼上自動解析 (vd6s-inspired onpaste auto-trigger)
+input.addEventListener('paste', () => {
+  setTimeout(() => {
+    const val = input.value.trim();
+    if (val.length > 0) {
+      parseCurrentInput();
+    }
+  }, 100);
 });
 
 const preferredTheme = localStorage.getItem('xhs-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');

@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ytdl from '@distube/ytdl-core';
+import { Innertube } from 'youtubei.js';
 import { assertHttpUrl, assertPublicResolution, extractFirstUrl } from '../utils.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -73,6 +74,20 @@ async function readTextWithLimit(response, maxBytes) {
 export function parseWatchPage(html, finalUrl) {
   const videoId = extractVideoId(finalUrl);
 
+  // Check for sign-in / age-restriction (vd6s-inspired error classification)
+  if (/sign_in|signin|Log in|accounts\.google/i.test(html.slice(0, 2000))) {
+    const error = new Error('此影片需要登入或受年齡限制，無法存取');
+    error.code = 'SIGN_IN_REQUIRED';
+    throw error;
+  }
+  // Check for unavailable / removed
+  if (/This video is|unavailable|removed|private/i.test(html.slice(0, 1000)) &&
+      !/<title>/.test(html.slice(0, 200))) {
+    const error = new Error('此影片已設為私人、已移除或無法存取');
+    error.code = 'VIDEO_UNAVAILABLE';
+    throw error;
+  }
+
   const playerMatch = html.match(/ytInitialPlayerResponse\s*=\s*({.+?})\s*;\s*<\/script>/s);
   let playerData = null;
   if (playerMatch) {
@@ -86,6 +101,9 @@ export function parseWatchPage(html, finalUrl) {
 
   let videoUrl = null;
   let cover = null;
+  /** @type {Array<{label:string,height:number,url:string,hasAudio:boolean,hasVideo:boolean}>} */
+  let formatList = [];
+
   if (playerData) {
     const formats = playerData?.streamingData?.formats || [];
     const adaptive = playerData?.streamingData?.adaptiveFormats || [];
@@ -93,6 +111,29 @@ export function parseWatchPage(html, finalUrl) {
       .filter((f) => f?.url)
       .sort((a, b) => (b.width || 0) - (a.width || 0));
     videoUrl = allFormats[0]?.url || null;
+
+    // Build quality list (vd6s-style format table)
+    const seen = new Set();
+    for (const f of allFormats) {
+      const h = f.height || 0;
+      const key = `${h}p`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const label = h >= 2160 ? `${Math.round(h / 1000)}K` :
+                    h >= 1440 ? '1440p' :
+                    h >= 1080 ? '1080p' :
+                    h >= 720  ? '720p' :
+                    h >= 480  ? '480p' :
+                    h >= 360  ? '360p' : '240p';
+      formatList.push({
+        label,
+        height: h,
+        url: f.url,
+        hasAudio: Boolean(f.audioChannels || f.audioBitrate),
+        hasVideo: Boolean(f.width || f.height)
+      });
+    }
+
     cover = playerData?.videoDetails?.thumbnail?.thumbnails?.slice(-1)[0]?.url ||
             `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg` || null;
   } else {
@@ -109,6 +150,7 @@ export function parseWatchPage(html, finalUrl) {
     sourceUrl: finalUrl, noteId: videoId, title, description, author, cover,
     type: videoId ? 'video' : null,
     videoUrl, alternatives: [],
+    formats: formatList,
     images: [],
     parser: playerData ? 'initial-state' : 'page-media-scan',
     platform: 'youtube'
@@ -133,6 +175,39 @@ async function expandAndFetchPage(rawUrl, options) {
   return { html, finalUrl: response.url };
 }
 
+let innertube = null;
+async function getInnerTube() {
+  if (!innertube) innertube = await Innertube.create({ client_type: 'ANDROID', lang: 'en' });
+  return innertube;
+}
+
+function pickFormat(formats) {
+  if (!formats?.length) return null;
+  return formats.filter((f) => f.url && f.hasAudio && f.hasVideo)
+    .sort((a, b) => (b.height || 0) - (a.height || 0))[0]
+    || formats.filter((f) => f.url && f.hasVideo)
+      .sort((a, b) => (b.height || 0) - (a.height || 0))[0]
+    || formats.find((f) => f.url);
+}
+
+function collectFormats(formats) {
+  if (!formats?.length) return [];
+  const seen = new Set(), result = [];
+  for (const f of formats) {
+    if (!f.url) continue;
+    const h = f.height || 0;
+    const key = `${h}p`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const label = h >= 2160 ? `${Math.round(h / 1000)}K` :
+                  h >= 1440 ? '1440p' : h >= 1080 ? '1080p' :
+                  h >= 720 ? '720p' : h >= 480 ? '480p' :
+                  h >= 360 ? '360p' : '240p';
+    result.push({ label, height: h, url: f.url, hasAudio: Boolean(f.hasAudio || f.audioChannels), hasVideo: Boolean(f.hasVideo || f.width) });
+  }
+  return result;
+}
+
 export async function resolveShare(inputText, options) {
   const extracted = extractFirstUrl(inputText);
   if (!extracted) throw new Error('找不到可解析的網址');
@@ -140,25 +215,48 @@ export async function resolveShare(inputText, options) {
   const videoId = extractVideoId(input.toString());
   if (!videoId) throw new Error('找不到 YouTube 影片 ID');
 
-  // Step 1: 先從頁面 HTML 提取
-  let result;
+  const fallbackResult = () => ({
+    sourceUrl: input.toString(), noteId: videoId,
+    title: null, description: null, author: null, cover: `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
+    type: 'video', videoUrl: null, alternatives: [], formats: [], images: [],
+    parser: 'page-media-scan', platform: 'youtube'
+  });
+
+  let result = fallbackResult();
+
+  // Step 1: InnerTube API (Android 端點，使用不同網域不容易被 IP 阻擋)
   try {
-    const { html, finalUrl } = await expandAndFetchPage(input.toString(), options);
-    result = parseWatchPage(html, finalUrl);
-  } catch (pageErr) {
-    console.error('[youtube] 頁面解析失敗:', pageErr?.message);
-    result = {
-      sourceUrl: input.toString(), noteId: videoId,
-      title: null, description: null, author: null, cover: null,
-      type: 'video', videoUrl: null, alternatives: [], images: [],
-      parser: 'page-media-scan', platform: 'youtube'
-    };
+    const yt = await getInnerTube();
+    const info = await yt.getInfo(videoId);
+    const fmts = [...(info.streaming_data?.formats || []), ...(info.streaming_data?.adaptive_formats || [])];
+    const best = pickFormat(fmts);
+    result.videoUrl = best?.url || null;
+    result.formats = collectFormats(fmts);
+    result.title = info.basic_info?.title || result.title;
+    result.author = info.basic_info?.author || result.author;
+    result.description = (info.basic_info?.description || '').slice(0, 5000) || result.description;
+    result.cover = info.basic_info?.thumbnail?.[0]?.url || result.cover;
+    result.parser = 'innertube-api';
+    if (result.videoUrl) return result;
+  } catch (itErr) {
+    console.error('[youtube] InnerTube 失敗:', itErr?.message?.slice(0, 100));
   }
 
-  // Step 2: 若頁面解析沒拿到影片網址，用 yt-dlp 提取串流
-  if (!result.videoUrl) {
-    // 2a: youtube-dl-exec 內建的 yt-dlp 二進位
-    if (existsSync(YTDLP_BIN)) {
+  // Step 2: 從頁面 HTML 提取
+  try {
+    const { html, finalUrl } = await expandAndFetchPage(input.toString(), options);
+    if (/live|直播/i.test(html.slice(0, 3000)) && /is live now|is streaming|直播中|正在直播/i.test(html.slice(0, 3000))) {
+      const error = new Error('直播中或剛結束的直播需等待幾天才可下載');
+      error.code = 'LIVE_STREAM';
+      throw error;
+    }
+    result = { ...result, ...parseWatchPage(html, finalUrl) };
+  } catch (pageErr) {
+    console.error('[youtube] 頁面解析失敗:', pageErr?.message);
+  }
+
+  // Step 3: yt-dlp 二進位
+  if (!result.videoUrl && existsSync(YTDLP_BIN)) {
       try {
         const info = await new Promise((resolve, reject) => {
           execFile(YTDLP_BIN, [
@@ -178,6 +276,27 @@ export async function resolveShare(inputText, options) {
           result.description = result.description || (info.description || '').slice(0, 5000) || null;
           result.author = result.author || info.uploader || null;
           result.cover = result.cover || info.thumbnail || null;
+        }
+        // Collect formats from yt-dlp
+        if (info.formats?.length) {
+          const seen = new Set();
+          for (const f of info.formats) {
+            if (!f.url) continue;
+            const h = f.height || 0;
+            const key = `${h}p`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            const label = h >= 2160 ? `${Math.round(h / 1000)}K` :
+                          h >= 1440 ? '1440p' :
+                          h >= 1080 ? '1080p' :
+                          h >= 720  ? '720p' :
+                          h >= 480  ? '480p' :
+                          h >= 360  ? '360p' : '240p';
+            result.formats = result.formats || [];
+            if (!result.formats.some((e) => e.label === label)) {
+              result.formats.push({ label, height: h, url: f.url, hasAudio: Boolean(f.acodec && f.acodec !== 'none'), hasVideo: Boolean(f.vcodec && f.vcodec !== 'none') });
+            }
+          }
         }
       } catch { /* yt-dlp binary 執行失敗 */ }
     }
@@ -207,6 +326,27 @@ export async function resolveShare(inputText, options) {
           result.description = result.description || info.videoDetails?.description?.slice(0, 5000) || null;
           result.author = result.author || info.videoDetails?.author?.name || null;
           result.cover = result.cover || info.videoDetails?.thumbnails?.slice(-1)[0]?.url || null;
+        }
+        // Collect formats from ytdl-core
+        if (info.formats?.length) {
+          const seen = new Set();
+          for (const f of info.formats) {
+            if (!f.url) continue;
+            const h = f.height || 0;
+            const key = `${h}p`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            const label = h >= 2160 ? `${Math.round(h / 1000)}K` :
+                          h >= 1440 ? '1440p' :
+                          h >= 1080 ? '1080p' :
+                          h >= 720  ? '720p' :
+                          h >= 480  ? '480p' :
+                          h >= 360  ? '360p' : '240p';
+            result.formats = result.formats || [];
+            if (!result.formats.some((e) => e.label === label)) {
+              result.formats.push({ label, height: h, url: f.url, hasAudio: Boolean(f.hasAudio), hasVideo: Boolean(f.hasVideo) });
+            }
+          }
         }
       } catch { /* ytdl-core 也失敗 */ }
     }

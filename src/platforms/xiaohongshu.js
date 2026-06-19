@@ -264,6 +264,7 @@ function pickMediaUrls(allStrings) {
   }
 
   const uniqueUrls = unique(expanded);
+  if (uniqueUrls.length === 0) return { videos: [], images: [] };
   const videos = uniqueUrls.filter(isVideoUrl).sort((a, b) => rankVideo(b) - rankVideo(a));
   const images = uniqueUrls.filter(isImageUrl).sort((a, b) => rankImage(b) - rankImage(a));
 

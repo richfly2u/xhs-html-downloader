@@ -91,6 +91,10 @@
           <div class="media-placeholder" id="mediaPlaceholder">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4V5Zm3 10 3-3 3 3 2-2 3 3M9 9h.01"/></svg>
           </div>
+          <div class="format-picker is-hidden" id="formatPicker">
+            <div class="format-picker-header">選擇畫質</div>
+            <div class="format-picker-list" id="formatList"></div>
+          </div>
         </div>
 
         <div class="result-content">
@@ -110,15 +114,23 @@
           </dl>
 
           <div class="result-actions">
-            <a class="button button-primary" id="downloadButton" href="#" download>
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 20h14"/></svg>
-              <span id="downloadLabel">下載影片</span>
-            </a>
-            <button class="button button-secondary" id="copyLinkButton" type="button">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 15 15 9m-7.5 2.5-2 2a3.5 3.5 0 0 0 5 5l2-2m4-9 2-2a3.5 3.5 0 0 0-5-5l-2 2"/></svg>
-              複製直連
-            </button>
-            <button class="button button-ghost is-hidden" id="copyTextButton" type="button">複製優化稿</button>
+            <div class="result-actions-primary">
+              <a class="button button-primary" id="downloadButton" href="#" download>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 20h14"/></svg>
+                <span id="downloadLabel">下載影片</span>
+              </a>
+              <button class="button button-secondary" id="copyLinkButton" type="button">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 15 15 9m-7.5 2.5-2 2a3.5 3.5 0 0 0 5 5l2-2m4-9 2-2a3.5 3.5 0 0 0-5-5l-2 2"/></svg>
+                複製直連
+              </button>
+            </div>
+            <div class="result-actions-secondary">
+              <button class="button button-ghost" id="coverDownloadButton" type="button">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 16v4h16v-4M12 4v12m0 0 4-4m-4 4-4-4"/></svg>
+                下載封面
+              </button>
+              <button class="button button-ghost is-hidden" id="copyTextButton" type="button">複製優化稿</button>
+            </div>
           </div>
         </div>
       </article>
