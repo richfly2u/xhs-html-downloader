@@ -1,2 +1,5 @@
 [phases.setup]
-aptPkgs = ["python3", "yt-dlp"]
+aptPkgs = ["python3", "python3-pip"]
+
+[phases.install]
+cmds = ["pip3 install yt-dlp --break-system-packages 2>/dev/null || pip3 install yt-dlp --system 2>/dev/null || pip3 install yt-dlp 2>/dev/null; which yt-dlp && yt-dlp --version || echo 'yt-dlp not installed'"]
