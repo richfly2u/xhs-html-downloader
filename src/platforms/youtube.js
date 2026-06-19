@@ -1,5 +1,34 @@
 import youtubedl from 'youtube-dl-exec';
+import { existsSync } from 'node:fs';
+import { mkdir, chmod } from 'node:fs/promises';
+import { createWriteStream } from 'node:fs';
+import { pipeline } from 'node:stream/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { assertHttpUrl, assertPublicResolution, extractFirstUrl } from '../utils.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const BIN_DIR = path.resolve(__dirname, '../../node_modules/youtube-dl-exec/bin');
+const BIN_NAME = process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp';
+const BIN_PATH = path.join(BIN_DIR, BIN_NAME);
+
+// 確保 yt-dlp 二進位存在；若無則直接從 GitHub 下載（避開 API rate limit）
+async function ensureBinary() {
+  if (existsSync(BIN_PATH)) return;
+  const url = `https://github.com/yt-dlp/yt-dlp/releases/latest/download/${BIN_NAME}`;
+  console.error(`[youtube] 下載 yt-dlp 二進位：${url}`);
+  await mkdir(BIN_DIR, { recursive: true });
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`下載 yt-dlp 失敗：HTTP ${resp.status}`);
+  await pipeline(resp.body, createWriteStream(BIN_PATH));
+  await chmod(BIN_PATH, 0o755);
+  console.error('[youtube] yt-dlp 下載完成');
+}
+
+// 模組載入時非同步確保二進位存在（不 blocking 啟動，但 blocking 第一次呼叫）
+let binaryReady = ensureBinary().catch((err) => {
+  console.error('[youtube] yt-dlp 確保失敗：', err.message);
+});
 
 export const name = 'youtube';
 
@@ -148,9 +177,10 @@ export async function resolveShare(inputText, options) {
     };
   }
 
-  // Step 2: 若頁面解析沒拿到影片網址，用 youtube-dl-exec (內建完整 yt-dlp) 提取
+  // Step 2: 若頁面解析沒拿到影片網址，用 yt-dlp 提取
   if (!result.videoUrl) {
     try {
+      await binaryReady;
       const info = await youtubedl(input.toString(), {
         dumpJson: true,
         noPlaylist: true,
