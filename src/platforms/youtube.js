@@ -1,4 +1,4 @@
-import youtubedl from 'youtube-dl-exec';
+import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, chmod } from 'node:fs/promises';
 import { createWriteStream } from 'node:fs';
@@ -8,27 +8,38 @@ import { fileURLToPath } from 'node:url';
 import { assertHttpUrl, assertPublicResolution, extractFirstUrl } from '../utils.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const BIN_DIR = path.resolve(__dirname, '../../node_modules/youtube-dl-exec/bin');
+// 優先使用 node_modules 內建二進位，若無則用 /tmp（Vercel Lambda 可寫目錄）
+const BIN_DIRS = [
+  path.resolve(__dirname, '../../node_modules/youtube-dl-exec/bin'),
+  '/tmp'
+];
 const BIN_NAME = process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp';
-const BIN_PATH = path.join(BIN_DIR, BIN_NAME);
 
-// 確保 yt-dlp 二進位存在；若無則直接從 GitHub 下載（避開 API rate limit）
-async function ensureBinary() {
-  if (existsSync(BIN_PATH)) return;
-  const url = `https://github.com/yt-dlp/yt-dlp/releases/latest/download/${BIN_NAME}`;
-  console.error(`[youtube] 下載 yt-dlp 二進位：${url}`);
-  await mkdir(BIN_DIR, { recursive: true });
-  const resp = await fetch(url);
-  if (!resp.ok) throw new Error(`下載 yt-dlp 失敗：HTTP ${resp.status}`);
-  await pipeline(resp.body, createWriteStream(BIN_PATH));
-  await chmod(BIN_PATH, 0o755);
-  console.error('[youtube] yt-dlp 下載完成');
+function findBinary() {
+  for (const dir of BIN_DIRS) {
+    const p = path.join(dir, BIN_NAME);
+    if (existsSync(p)) return p;
+  }
+  // Fallback to PATH（pip 安裝的 yt-dlp、或系統路徑）
+  return BIN_NAME; // execFile 會搜尋 PATH
 }
 
-// 模組載入時非同步確保二進位存在（不 blocking 啟動，但 blocking 第一次呼叫）
-let binaryReady = ensureBinary().catch((err) => {
-  console.error('[youtube] yt-dlp 確保失敗：', err.message);
-});
+async function downloadBinary() {
+  const targetDir = process.env.VERCEL ? '/tmp' : BIN_DIRS[0];
+  const targetPath = path.join(targetDir, BIN_NAME);
+  await mkdir(targetDir, { recursive: true });
+  const url = `https://github.com/yt-dlp/yt-dlp/releases/latest/download/${BIN_NAME}`;
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`下載 yt-dlp 失敗：HTTP ${resp.status}`);
+  await pipeline(resp.body, createWriteStream(targetPath));
+  await chmod(targetPath, 0o755);
+  return targetPath;
+}
+
+// 確保二進位可用，回傳路徑
+async function ensureBinary() {
+  return findBinary() || downloadBinary();
+}
 
 export const name = 'youtube';
 
@@ -180,17 +191,25 @@ export async function resolveShare(inputText, options) {
   // Step 2: 若頁面解析沒拿到影片網址，用 yt-dlp 提取
   if (!result.videoUrl) {
     try {
-      await binaryReady;
-      const info = await youtubedl(input.toString(), {
-        dumpJson: true,
-        noPlaylist: true,
-        format: 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
+      const binPath = await ensureBinary();
+      const info = await new Promise((resolve, reject) => {
+        execFile(binPath, [
+          input.toString(),
+          '-j', '--no-playlist',
+          '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
+        ], {
+          timeout: 30_000,
+          maxBuffer: 50 * 1024 * 1024,
+          windowsHide: true
+        }, (err, stdout) => {
+          if (err) { reject(new Error(`yt-dlp 失敗：${err.message}`)); return; }
+          try { resolve(JSON.parse(stdout)); }
+          catch { reject(new Error('yt-dlp 輸出無效')); }
+        });
       });
 
       const allFormats = info.formats || [];
-      // 挑選有 URL 的最高畫質格式
-      const best = allFormats
-        .filter((f) => f.url)
+      const best = allFormats.filter((f) => f.url)
         .sort((a, b) => (b.height || 0) - (a.height || 0))[0];
       result.videoUrl = best?.url || result.videoUrl;
       result.title = result.title || info.title || null;
@@ -198,7 +217,7 @@ export async function resolveShare(inputText, options) {
       result.author = result.author || info.uploader || null;
       result.cover = result.cover || info.thumbnail || null;
     } catch {
-      // youtube-dl-exec 失敗就保留頁面取得的資料
+      // yt-dlp 失敗就保留頁面取得的資料
     }
   }
 
