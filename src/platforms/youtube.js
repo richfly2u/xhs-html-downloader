@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process';
 import ytdl from '@distube/ytdl-core';
 import { assertHttpUrl, assertPublicResolution, extractFirstUrl } from '../utils.js';
 
@@ -147,36 +148,59 @@ export async function resolveShare(inputText, options) {
     };
   }
 
-  // Step 2: 若頁面解析沒拿到影片網址，用 @distube/ytdl-core 提取
+  // Step 2: 若頁面解析沒拿到影片網址，嘗試 yt-dlp → @distube/ytdl-core
   if (!result.videoUrl) {
+    // 2a: 系統 yt-dlp（Railway 上可用，完整解碼）
     try {
-      // 嘗試不同 client 來繞過 YouTube bot 阻擋
-      let info;
-      for (const client of ['web', 'ios', 'android']) {
-        try {
-          info = await ytdl.getInfo(input.toString(), { clients: [client] });
-          if (info?.formats?.some((f) => f.url)) break;
-        } catch { continue; }
-      }
-
-      if (info) {
+      await new Promise((resolve, reject) => {
+        execFile('yt-dlp', [
+          input.toString(), '-j', '--no-playlist',
+          '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
+        ], { timeout: 30_000, maxBuffer: 50 * 1024 * 1024 }, (err, stdout) => {
+          if (err) { reject(err); return; }
+          try { resolve(JSON.parse(stdout)); } catch { reject(new Error('JSON parse error')); }
+        });
+      }).then((info) => {
         const allFormats = info.formats || [];
-        const best = allFormats.filter((f) => f.url && f.hasAudio && f.hasVideo)
-          .sort((a, b) => (b.height || 0) - (a.height || 0))[0]
-          || allFormats.filter((f) => f.url && f.hasVideo)
-            .sort((a, b) => (b.height || 0) - (a.height || 0))[0]
-          || allFormats.filter((f) => f.url && f.hasAudio)
-            .sort((a, b) => (a.bitrate || 0) - (a.bitrate || 0))[0]
-          || allFormats.find((f) => f.url);
+        const best = allFormats.filter((f) => f.url)
+          .sort((a, b) => (b.height || 0) - (a.height || 0))[0];
+        if (best?.url) {
+          result.videoUrl = best.url;
+          result.title = result.title || info.title || null;
+          result.description = result.description || (info.description || '').slice(0, 5000) || null;
+          result.author = result.author || info.uploader || null;
+          result.cover = result.cover || info.thumbnail || null;
+        }
+      });
+    } catch { /* yt-dlp 不可用，繼續下一種 */ }
 
-        result.videoUrl = best?.url || result.videoUrl;
-        result.title = result.title || info.videoDetails?.title || null;
-        result.description = result.description || info.videoDetails?.description?.slice(0, 5000) || null;
-        result.author = result.author || info.videoDetails?.author?.name || null;
-        result.cover = result.cover || info.videoDetails?.thumbnails?.slice(-1)[0]?.url || null;
-      }
-    } catch {
-      // 所有 client 都失敗，保留頁面資料
+    // 2b: @distube/ytdl-core（純 JS，無外部依賴）
+    if (!result.videoUrl) {
+      try {
+        let info;
+        for (const client of ['web', 'ios', 'android']) {
+          try {
+            info = await ytdl.getInfo(input.toString(), { clients: [client] });
+            if (info?.formats?.some((f) => f.url)) break;
+          } catch { continue; }
+        }
+        if (info) {
+          const allFormats = info.formats || [];
+          const best = allFormats.filter((f) => f.url && f.hasAudio && f.hasVideo)
+            .sort((a, b) => (b.height || 0) - (a.height || 0))[0]
+            || allFormats.filter((f) => f.url && f.hasVideo)
+              .sort((a, b) => (b.height || 0) - (a.height || 0))[0]
+            || allFormats.filter((f) => f.url && f.hasAudio)
+              .sort((a, b) => (a.bitrate || 0) - (a.bitrate || 0))[0]
+            || allFormats.find((f) => f.url);
+
+          result.videoUrl = best?.url || result.videoUrl;
+          result.title = result.title || info.videoDetails?.title || null;
+          result.description = result.description || info.videoDetails?.description?.slice(0, 5000) || null;
+          result.author = result.author || info.videoDetails?.author?.name || null;
+          result.cover = result.cover || info.videoDetails?.thumbnails?.slice(-1)[0]?.url || null;
+        }
+      } catch { /* ytdl-core 也失敗 */ }
     }
   }
 
