@@ -137,6 +137,7 @@ textarea::placeholder { color: color-mix(in srgb, var(--muted) 72%, transparent)
 .media-type, .parser-label { display: inline-flex; align-items: center; min-height: 27px; padding: 0 10px; border-radius: 999px; font-size: 11px; font-weight: 800; }
 .media-type { color: #fff; background: var(--accent); }
 .parser-label { color: var(--muted); background: var(--bg-soft); }
+.platform-label { background: linear-gradient(135deg, #7c5cff, #5f73ff); color: #fff; }
 .result-content h3 { margin: 0; font-size: clamp(24px, 4vw, 34px); line-height: 1.25; letter-spacing: -.035em; }
 .author-line { margin: 10px 0 0; color: var(--accent); font-size: 13px; font-weight: 750; }
 .description { display: -webkit-box; margin: 16px 0 0; overflow: hidden; color: var(--muted); font-size: 14px; line-height: 1.75; -webkit-line-clamp: 5; -webkit-box-orient: vertical; }
