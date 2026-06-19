@@ -1,8 +1,8 @@
 import * as xiaohongshu from './xiaohongshu.js';
+import * as douyin from './douyin.js';
+import * as tiktok from './tiktok.js';
 
 // Platform modules — import now, implement later
-const douyin = null;
-const tiktok = null;
 const youtube = null;
 
 const platforms = [xiaohongshu, douyin, tiktok, youtube].filter(Boolean);
