@@ -6,9 +6,8 @@ import ytdl from '@distube/ytdl-core';
 import { assertHttpUrl, assertPublicResolution, extractFirstUrl } from '../utils.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const YTDLP_BIN = process.platform === 'win32'
-  ? path.resolve(__dirname, '../../node_modules/youtube-dl-exec/bin/yt-dlp.exe')
-  : path.resolve(__dirname, '../../node_modules/youtube-dl-exec/bin/yt-dlp');
+const YTDLP_BIN = path.resolve(__dirname, '../../node_modules/.bin/yt-dlp'
+  + (process.platform === 'win32' ? '.exe' : ''));
 
 export const name = 'youtube';
 

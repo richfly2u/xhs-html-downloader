@@ -6,6 +6,7 @@
   "type": "module",
   "main": "src/index.js",
   "scripts": {
+    "postinstall": "node scripts/postinstall.mjs",
     "start": "node src/local.js",
     "dev": "node --watch src/local.js",
     "test": "node --test"
