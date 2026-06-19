@@ -1,5 +1,6 @@
 import { probeMedia } from './resolver.js';
-import { assertHttpUrl, assertPublicResolution, isMediaHost, unique } from './utils.js';
+import { assertHttpUrl, assertPublicResolution, unique } from './utils.js';
+import { isMediaHost } from './platforms/index.js';
 
 const OPENAI_API_BASE = 'https://api.openai.com/v1';
 const GROQ_API_BASE = 'https://api.groq.com/openai/v1';

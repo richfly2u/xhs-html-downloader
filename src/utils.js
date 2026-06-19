@@ -2,14 +2,6 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import dns from 'node:dns/promises';
 import net from 'node:net';
 
-const SHARE_HOSTS = new Set([
-  'xhslink.com',
-  'www.xhslink.com',
-  'xiaohongshu.com',
-  'www.xiaohongshu.com',
-  'm.xiaohongshu.com'
-]);
-
 export function extractFirstUrl(input = '') {
   const text = String(input).trim();
   const match = text.match(/https?:\/\/[^\s<>"'，。！？、）\]]+/i);
@@ -27,15 +19,6 @@ export function normalizeEscapedUrl(value = '') {
     .replace(/&amp;/gi, '&')
     .replace(/\\x26/gi, '&')
     .trim();
-}
-
-export function isShareHost(hostname = '') {
-  return SHARE_HOSTS.has(hostname.toLowerCase());
-}
-
-export function isMediaHost(hostname = '') {
-  const host = hostname.toLowerCase();
-  return host === 'xhscdn.com' || host.endsWith('.xhscdn.com');
 }
 
 export function assertHttpUrl(rawUrl) {
