@@ -10,8 +10,9 @@ import { assertHttpUrl, assertPublicResolution, extractFirstUrl } from '../utils
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // 優先使用 node_modules 內建二進位，若無則用 /tmp（Vercel Lambda 可寫目錄）
 const BIN_DIRS = [
-  path.resolve(__dirname, '../../node_modules/youtube-dl-exec/bin'),
-  '/tmp'
+  path.resolve(__dirname, '../../bin'),               // vercel-build 預先下載
+  path.resolve(__dirname, '../../node_modules/youtube-dl-exec/bin'), // npm 套件
+  '/tmp'                                               // Vercel 冷啟動備援
 ];
 const BIN_NAME = process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp';
 
@@ -183,7 +184,8 @@ export async function resolveShare(inputText, options) {
   try {
     const { html, finalUrl } = await expandAndFetchPage(input.toString(), options);
     result = parseWatchPage(html, finalUrl);
-  } catch {
+  } catch (pageErr) {
+    console.error('[youtube] 頁面解析失敗:', pageErr?.message);
     result = {
       sourceUrl: input.toString(), noteId: videoId,
       title: null, description: null, author: null, cover: null,
@@ -213,15 +215,16 @@ export async function resolveShare(inputText, options) {
       });
 
       const allFormats = info.formats || [];
-      const best = allFormats.filter((f) => f.url)
+      const best = allFormats
+        .filter((f) => f.url || f.manifest_url || f.fragment_base_url)
         .sort((a, b) => (b.height || 0) - (a.height || 0))[0];
-      result.videoUrl = best?.url || result.videoUrl;
+      result.videoUrl = best?.url || best?.manifest_url || best?.fragment_base_url || result.videoUrl;
       result.title = result.title || info.title || null;
       result.description = result.description || (info.description || '').slice(0, 5000) || null;
       result.author = result.author || info.uploader || null;
       result.cover = result.cover || info.thumbnail || null;
-    } catch {
-      // yt-dlp 失敗就保留頁面取得的資料
+    } catch (ytErr) {
+      console.error('[youtube] yt-dlp 提取失敗:', ytErr?.message);
     }
   }
 
