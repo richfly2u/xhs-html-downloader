@@ -10,6 +10,9 @@ import { rateLimit } from 'express-rate-limit';
 import { probeMedia, resolvePublicShare } from './resolver.js';
 import { analyzeCopy } from './analyzer.js';
 import { fetchThumbnail } from './thumbnail.js';
+import { extractVideoId } from './platforms/youtube.js';
+import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import {
   assertHttpUrl,
   assertPublicResolution,
@@ -301,6 +304,58 @@ app.get('/api/media', mediaLimiter, async (req, res) => {
     }
   } finally {
     clearTimeout(timer);
+  }
+});
+
+// 即時 YouTube 下載連結（解決 CDN URL 時效問題）
+const YTDLP_BIN2 = process.platform === 'win32'
+  ? path.resolve(__dirname, '../node_modules/youtube-dl-exec/bin/yt-dlp.exe')
+  : path.resolve(__dirname, '../node_modules/youtube-dl-exec/bin/yt-dlp');
+
+app.get('/api/yt-fresh', async (req, res) => {
+  try {
+    const rawUrl = String(req.query.url || '');
+    const quality = String(req.query.q || 'best');
+    if (!rawUrl) return res.status(400).json({ success: false, error: '缺少 YouTube 網址' });
+    const videoId = extractVideoId(rawUrl);
+    if (!videoId) return res.status(400).json({ success: false, error: '找不到 YouTube 影片 ID' });
+
+    // yt-dlp
+    if (existsSync(YTDLP_BIN2)) {
+      try {
+        const formatArg = quality === 'best' ? 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
+          : `bestvideo[height<=${quality}][ext=mp4]+bestaudio[ext=m4a]/best[height<=${quality}][ext=mp4]/best`;
+        const url = await new Promise((resolve, reject) => {
+          execFile(YTDLP_BIN2, [`https://www.youtube.com/watch?v=${videoId}`, '-g', '--no-playlist', '-f', formatArg],
+            { timeout: 25_000, maxBuffer: 1024 * 1024 }, (err, stdout) => {
+              if (err) { reject(err); return; }
+              resolve(stdout.trim().split('\n')[0]);
+            });
+        });
+        if (url) return res.json({ success: true, url, videoId, quality });
+      } catch { /* next */ }
+    }
+
+    // @distube/ytdl-core 備援
+    try {
+      const { default: ytdl } = await import('@distube/ytdl-core');
+      let info;
+      for (const client of ['web', 'ios', 'android']) {
+        try { info = await ytdl.getInfo(rawUrl, { clients: [client] }); if (info?.formats?.some(f => f.url)) break; }
+        catch { continue; }
+      }
+      if (info) {
+        const fmts = info.formats.filter(f => f.url);
+        const best = fmts.filter(f => f.hasAudio && f.hasVideo).sort((a, b) => (b.height || 0) - (a.height || 0))[0]
+          || fmts.filter(f => f.hasVideo).sort((a, b) => (b.height || 0) - (a.height || 0))[0]
+          || fmts[0];
+        if (best?.url) return res.json({ success: true, url: best.url, videoId, quality });
+      }
+    } catch { /* failed */ }
+
+    return res.status(404).json({ success: false, error: '無法取得即時下載連結' });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error instanceof Error ? error.message : '取得連結失敗' });
   }
 });
 

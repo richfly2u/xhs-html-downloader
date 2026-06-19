@@ -60,7 +60,7 @@ export default async function handler(req, res) {
           size: formatBytes(probe.bytes),
           contentType: probe.contentType || 'video/mp4'
         }
-      : data.type === 'video'
+      : data.type === 'video' && data.platform !== 'youtube'
         ? {
             kind: 'video',
             directUrl: data.sourceUrl,

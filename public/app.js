@@ -336,13 +336,30 @@ function renderResult(data) {
         meta.textContent = '僅音訊';
         btn.appendChild(meta);
       }
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', async () => {
         formatList.querySelectorAll('.format-btn').forEach((b) => b.classList.remove('is-active'));
         btn.classList.add('is-active');
+        btn.disabled = true;
+        btn.textContent = '取得中…';
         selectedFormat = fmt;
-        if (fmt.url) {
-          // Open format URL directly in new tab
-          window.open(fmt.url, '_blank', 'noopener,noreferrer');
+        try {
+          // Call fresh URL endpoint to get a non-expired download link
+          const videoUrl = resultData?.sourceUrl || resultData?.video?.directUrl || input.value.trim();
+          const resp = await fetch(`/api/yt-fresh?url=${encodeURIComponent(videoUrl)}&q=${fmt.height || ''}`);
+          const data = await resp.json();
+          if (data.success && data.url) {
+            window.open(data.url, '_blank', 'noopener,noreferrer');
+          } else {
+            showToast('無法取得下載連結，請稍後再試');
+          }
+        } catch {
+          showToast('請求失敗，請稍後再試');
+        } finally {
+          btn.disabled = false;
+          btn.textContent = '';
+          const label = document.createElement('span');
+          label.textContent = fmt.label;
+          btn.appendChild(label);
         }
       });
       list.appendChild(btn);
