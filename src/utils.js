@@ -6,10 +6,7 @@ const SHARE_HOSTS = new Set([
   'www.xhslink.com',
   'xiaohongshu.com',
   'www.xiaohongshu.com',
-  'm.xiaohongshu.com',
-  'rednote.cn',
-  'www.rednote.cn',
-  'm.rednote.cn'
+  'm.xiaohongshu.com'
 ]);
 
 export function extractFirstUrl(input = '') {
@@ -32,13 +29,7 @@ export function normalizeEscapedUrl(value = '') {
 }
 
 export function isShareHost(hostname = '') {
-  const host = hostname.toLowerCase();
-  if (SHARE_HOSTS.has(host)) return true;
-  // Also accept subdomains of known share hosts
-  for (const known of SHARE_HOSTS) {
-    if (host === known || host.endsWith('.' + known)) return true;
-  }
-  return false;
+  return SHARE_HOSTS.has(hostname.toLowerCase());
 }
 
 export function isMediaHost(hostname = '') {
