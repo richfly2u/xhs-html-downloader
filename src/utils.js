@@ -34,9 +34,7 @@ export function isShareHost(hostname = '') {
 
 export function isMediaHost(hostname = '') {
   const host = hostname.toLowerCase();
-  return host === 'xhscdn.com' || host.endsWith('.xhscdn.com')
-    || host === 'xiaohongshu.com' || host.endsWith('.xiaohongshu.com')
-    || host === 'xhs.cn' || host.endsWith('.xhs.cn');
+  return host === 'xhscdn.com' || host.endsWith('.xhscdn.com');
 }
 
 export function assertHttpUrl(rawUrl) {
