@@ -258,25 +258,23 @@ function iconDownload() {
 }
 
 
-function configureDownloadLink(link, url, directLabel) {
-  link.href = url || '#';
-  let isExternal = false;
-  try {
-    isExternal = Boolean(url) && new URL(url, window.location.href).origin !== window.location.origin;
-  } catch {
-    isExternal = false;
-  }
+function proxyUrl(raw) {
+  if (!raw || raw === '#') return '#';
+  return `/api/download?url=${encodeURIComponent(raw)}`;
+}
 
-  link.dataset.external = isExternal ? '1' : '0';
-  if (isExternal) {
-    link.target = '_blank';
-    link.rel = 'noopener noreferrer';
-    link.removeAttribute('download');
-    if (link === downloadButton) downloadLabel.textContent = directLabel;
-  } else {
-    link.removeAttribute('target');
-    link.removeAttribute('rel');
+function configureDownloadLink(link, url, directLabel) {
+  const proxy = proxyUrl(url);
+  link.href = proxy;
+  link.removeAttribute('target');
+  link.rel = '';
+  if (proxy !== '#') {
     link.setAttribute('download', '');
+    link.dataset.external = '0';
+    if (link === downloadButton) downloadLabel.textContent = '下載';
+  } else {
+    link.dataset.external = '0';
+    link.removeAttribute('download');
   }
 }
 
