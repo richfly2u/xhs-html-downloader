@@ -287,6 +287,24 @@ export function parsePublicPageHtml(html, finalUrl = '') {
   strings.push(html);
 
   const { videos, images } = pickMediaUrls(strings);
+
+  // Also explicitly extract video URL from noteCard if type is 'video'
+  let explicitVideoUrl = null;
+  if (noteCard) {
+    const noteType = getString(noteCard, ['type', 'noteType', 'note_type', 'noteCardType']);
+    if (noteType === 'video') {
+      const videoBlock = noteCard.video || noteCard.media || noteCard.videoInfo || noteCard.video_info;
+      if (videoBlock) {
+        const stream = videoBlock.stream || videoBlock.media?.stream || videoBlock;
+        const h264Master = stream.h264?.[0]?.master_url
+          || stream.h264?.[0]?.url
+          || stream.h264?.[0]?.backup_url;
+        const mp4Url = getString(videoBlock, ['downloadUrl', 'download_url', 'url', 'directUrl', 'direct_url']);
+        explicitVideoUrl = h264Master || mp4Url || null;
+      }
+    }
+  }
+
   const title =
     getString(noteCard, ['title', 'displayTitle', 'display_title']) ||
     $('meta[property="og:title"]').attr('content') ||
@@ -305,6 +323,8 @@ export function parsePublicPageHtml(html, finalUrl = '') {
     images[0] ||
     null;
 
+  const bestVideoUrl = explicitVideoUrl || videos[0] || null;
+
   return {
     sourceUrl: finalUrl || null,
     noteId,
@@ -312,8 +332,8 @@ export function parsePublicPageHtml(html, finalUrl = '') {
     description,
     author: getAuthor(noteCard),
     cover,
-    type: videos[0] ? 'video' : (images.length ? 'images' : null),
-    videoUrl: videos[0] || null,
+    type: bestVideoUrl ? 'video' : (images.length ? 'images' : null),
+    videoUrl: bestVideoUrl,
     alternatives: videos.slice(1, 8),
     images: images.slice(0, 30),
     parser: noteCard ? 'initial-state' : 'page-media-scan'
