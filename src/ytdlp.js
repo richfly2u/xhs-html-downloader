@@ -1,52 +1,71 @@
 /**
- * Xiaohongshu internal API fallback for video extraction
+ * yt-dlp fallback for xiaohongshu URL parsing
  * Used when HTML scraping fails due to xsec_token changes
- * Calls edith.xiaohongshu.com API directly with the xsec_token from URL
+ * Downloads yt-dlp binary on first run (cached by Vercel)
  */
+import { execSync } from 'node:child_process';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const BIN_DIR = path.resolve(__dirname, '../bin');
+const YTDLP_PATH = path.join(BIN_DIR, process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp');
+
+async function ensureBinary() {
+  if (existsSync(YTDLP_PATH)) return;
+  mkdirSync(BIN_DIR, { recursive: true });
+
+  const platform = process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'macos' : 'linux';
+  const arch = process.arch === 'arm64' ? 'arm64' : 'amd64';
+  const url = `https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_${platform}_${arch}`;
+
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Failed to download yt-dlp: ${response.status}`);
+  const buffer = Buffer.from(await response.arrayBuffer());
+  writeFileSync(YTDLP_PATH, buffer);
+  execSync(`chmod +x "${YTDLP_PATH}"`);
+}
 
 export async function tryExtract(url) {
-  // Try xiaohongshu internal API first (lighter than yt-dlp)
-  const noteId = url.match(/\/item\/([a-f0-9]+)/)?.[1];
-  if (!noteId) return null;
+  try {
+    await ensureBinary();
 
-  // Extract xsec_token from URL
-  const urlObj = new URL(url);
-  const xsecToken = urlObj.searchParams.get('xsec_token') || '';
+    const stdout = execSync(
+      `"${YTDLP_PATH}" --dump-json --no-download --quiet --no-warnings "${url}"`,
+      { timeout: 30000, encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 }
+    ).trim();
 
-  // Try edith API
-  const apiUrl = `https://edith.xiaohongshu.com/api/sns/web/v1/feed?note_id=${noteId}&xsec_token=${encodeURIComponent(xsecToken)}`;
+    if (!stdout) return null;
 
-  const response = await fetch(apiUrl, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/134.0 Safari/537.36',
-      'Accept': 'application/json, text/plain, */*',
-      'Referer': `https://www.xiaohongshu.com/discovery/item/${noteId}`,
-      'Origin': 'https://www.xiaohongshu.com',
-    },
-  });
+    const info = JSON.parse(stdout);
 
-  if (!response.ok) return null;
+    // Extract video URL
+    let videoUrl = info.url || '';
 
-  const json = await response.json();
-  const note = json?.data?.items?.[0]?.note_card || json?.data?.items?.[0];
-  if (!note) return null;
+    // Try to get the best format URL
+    if (!videoUrl && info.requested_formats?.length) {
+      const videoFmt = info.requested_formats.find(f => f.vcodec && f.vcodec !== 'none');
+      videoUrl = videoFmt?.url || '';
+    }
 
-  // Check for video
-  const videoBlock = note.video || note.media || note.videoInfo || note.video_info;
-  let videoUrl = null;
-  if (videoBlock) {
-    const stream = videoBlock.stream || videoBlock.media?.stream || videoBlock;
-    videoUrl = stream.h264?.[0]?.master_url
-      || stream.h264?.[0]?.url
-      || stream.h264?.[0]?.backup_url
-      || videoBlock.downloadUrl || videoBlock.download_url
-      || videoBlock.url || videoBlock.directUrl || videoBlock.direct_url;
+    if (!videoUrl && info.formats?.length) {
+      const bestFormat = info.formats
+        .filter(f => f.vcodec && f.vcodec !== 'none')
+        .sort((a, b) => (b.height || 0) - (a.height || 0))[0];
+      videoUrl = bestFormat?.url || '';
+    }
+
+    if (!videoUrl) return null;
+
+    return {
+      videoUrl,
+      title: info.title || null,
+      duration: info.duration || null,
+      thumbnail: info.thumbnail || null,
+    };
+  } catch (err) {
+    console.error('[ytdlp fallback error]', err.message);
+    return null;
   }
-
-  if (!videoUrl) return null;
-
-  return {
-    videoUrl,
-    title: note.title || note.displayTitle || note.display_title || null,
-  };
 }
