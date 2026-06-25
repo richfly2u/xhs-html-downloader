@@ -47,6 +47,7 @@ export default async function handler(req, res) {
   try {
     const body = getBody(req);
     const input = body.url || body.text;
+    const cookie = body.cookie || process.env.XHS_COOKIE || '';
 
     if (typeof input !== 'string' || input.trim().length === 0) {
       return res.status(400).json({ success: false, error: '請提供小紅書分享文字或連結' });
@@ -57,7 +58,8 @@ export default async function handler(req, res) {
 
     const data = await resolvePublicShare(input, {
       timeoutMs: requestTimeoutMs,
-      maxHtmlBytes
+      maxHtmlBytes,
+      cookie
     });
 
     let probe = { bytes: null, contentType: null };
