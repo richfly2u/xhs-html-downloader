@@ -347,9 +347,14 @@ async function expandAndFetchPage(rawUrl, options) {
   }
   await assertPublicResolution(input.hostname);
 
+  const fetchHeaders = { ...DESKTOP_HEADERS };
+  if (options.cookie) {
+    fetchHeaders['Cookie'] = options.cookie;
+  }
+
   const response = await fetch(input, {
     redirect: 'follow',
-    headers: DESKTOP_HEADERS,
+    headers: fetchHeaders,
     signal: timeoutSignal(options.timeoutMs)
   });
   const finalUrl = assertHttpUrl(response.url);
