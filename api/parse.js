@@ -60,28 +60,6 @@ export default async function handler(req, res) {
       maxHtmlBytes
     });
 
-    // If HTML parsing didn't find video, try yt-dlp as fallback
-    if (!data.videoUrl && data.images.length <= 2) {
-      try {
-        const ytdlp = await import('../src/ytdlp.js');
-        const ytResult = await ytdlp.tryExtract(input);
-        if (ytResult?.videoUrl) {
-          data.videoUrl = ytResult.videoUrl;
-          data.type = 'video';
-          data.video = {
-            kind: 'video',
-            directUrl: ytResult.videoUrl,
-            previewUrl: ytResult.videoUrl,
-            downloadUrl: ytResult.videoUrl,
-            filename: `${safeFilename(data.title || data.noteId || 'xiaohongshu')}.mp4`
-          };
-          if (ytResult.title) data.title = ytResult.title;
-        }
-      } catch {
-        // yt-dlp fallback failed, keep HTML parsing result
-      }
-    }
-
     let probe = { bytes: null, contentType: null };
     if (data.videoUrl) {
       try {
