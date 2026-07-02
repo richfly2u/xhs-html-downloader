@@ -357,14 +357,9 @@ function renderResult(data) {
       const btn = document.createElement('a');
       btn.className = 'yt-format-dl';
       btn.textContent = '下載';
-      btn.addEventListener('click', async (e) => {
+      btn.addEventListener('click', (e) => {
         e.preventDefault();
-        btn.textContent = '…';
-        btn.style.pointerEvents = 'none';
-        const dlUrl = fmt.url || data.sourceUrl || input.value.trim();
-        if (!dlUrl) { showToast('無下載連結'); return; }
-        // Open in new tab for download
-        window.open('/api/download?url=' + encodeURIComponent(dlUrl), '_blank');
+        window.open('http://108.61.163.87:8799/api/dl?url=' + encodeURIComponent(data.sourceUrl || input.value.trim()) + '&title=' + encodeURIComponent(data.title || 'youtube'), '_blank');
       });
       row.appendChild(btn);
       return row;
@@ -429,7 +424,7 @@ function renderResult(data) {
       downloadButton.onclick = (e) => {
         e.preventDefault();
         downloadLabel.textContent = '準備下載…';
-        window.open('/api/dl-proxy?url=' + encodeURIComponent(ytDlUrl), '_blank');
+        window.open('http://108.61.163.87:8799/api/dl?url=' + encodeURIComponent(ytDlUrl) + '&title=' + encodeURIComponent(data.title || 'youtube'), '_blank');
         setTimeout(() => { downloadLabel.textContent = '下載影片'; }, 2000);
       };
     } else {
