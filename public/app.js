@@ -319,7 +319,7 @@ function renderResult(data) {
 
   const isVideo = Boolean(data.video);
   // Build format picker for YouTube
-  if (data.platform === 'youtube' && data.formats?.length > 0) {
+  if (data.platform === 'youtube' && data.formats?.length > 0 && formatList) {
     const list = formatList;
     list.textContent = '';
     
@@ -440,7 +440,7 @@ function renderResult(data) {
       list.appendChild(videoSection);
     }
     
-    formatPicker.classList.remove('is-hidden');
+    formatPicker?.classList.remove('is-hidden');
     const totalFormats = audioFormats.length + videoFormats.length;
     $('countValue').textContent = `${totalFormats} 種格式`;
   }
