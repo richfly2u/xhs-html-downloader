@@ -512,8 +512,8 @@ function renderResult(data) {
   }
 
   // 縮圖下載按鈕 (vd6s-style thumbnail download)
-  coverDownloadButton.classList.toggle('is-hidden', !data.cover);
-  coverDownloadButton.dataset.url = data.cover || '';
+  $('coverDownloadButton')?.classList.toggle('is-hidden', !data.cover);
+  $('coverDownloadButton') && ($('coverDownloadButton').dataset.url = data.cover || '');
 
   $('mediaType').textContent = isVideo ? '影片' : '圖片筆記';
   $('parserLabel').textContent = parserName(data.parser);
