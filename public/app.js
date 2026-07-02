@@ -458,19 +458,24 @@ function renderResult(data) {
     if (data.cover) videoPlayer.poster = data.cover;
     videoPlayer.classList.remove('is-hidden');
     configureDownloadLink(downloadButton, data.video.downloadUrl || data.video.directUrl, '開啟影片下載');
-    // YouTube: override click to download through VPS proxy
+    // YouTube: override click to download through VPS/Vercel proxy
     if (data.platform === 'youtube') {
       const ytDlUrl = data.video.downloadUrl || data.video.directUrl;
       const ytTitle = data.title || 'video';
+      downloadButton.href = '/api/download?url=' + encodeURIComponent(ytDlUrl);
+      downloadButton.target = '';
+      downloadButton.rel = '';
+      downloadButton.setAttribute('download', '');
+      downloadButton.dataset.external = '0';
+      downloadLabel.textContent = '下載影片';
+      // Also update copy link
+      copyLinkButton.dataset.url = ytDlUrl;
+      // Keep onclick for blob download fallback
       downloadButton.onclick = async (e) => {
         e.preventDefault();
         downloadLabel.textContent = '下載中…';
         try {
-          const resp = await fetch('http://108.61.163.87:8799/api/dl', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ url: ytDlUrl, title: ytTitle })
-          });
+          const resp = await fetch(downloadButton.href);
           if (!resp.ok) throw new Error('下載失敗');
           const blob = await resp.blob();
           const blobUrl = URL.createObjectURL(blob);
@@ -482,9 +487,10 @@ function renderResult(data) {
           a.remove();
           URL.revokeObjectURL(blobUrl);
           downloadLabel.textContent = '下載完成';
+          setTimeout(() => { downloadLabel.textContent = '下載影片'; }, 3000);
         } catch (err) {
-          downloadLabel.textContent = '下載失敗';
-          showError('YouTube 下載失敗，請稍後再試。');
+          downloadLabel.textContent = '開啟影片…';
+          window.open(ytDlUrl, '_blank');
         }
       };
     } else {
