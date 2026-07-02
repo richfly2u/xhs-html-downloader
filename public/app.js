@@ -458,6 +458,38 @@ function renderResult(data) {
     if (data.cover) videoPlayer.poster = data.cover;
     videoPlayer.classList.remove('is-hidden');
     configureDownloadLink(downloadButton, data.video.downloadUrl || data.video.directUrl, '開啟影片下載');
+    // YouTube: override click to download through VPS proxy
+    if (data.platform === 'youtube') {
+      const ytDlUrl = data.video.downloadUrl || data.video.directUrl;
+      const ytTitle = data.title || 'video';
+      downloadButton.onclick = async (e) => {
+        e.preventDefault();
+        downloadLabel.textContent = '下載中…';
+        try {
+          const resp = await fetch('http://108.61.163.87:8799/api/dl', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ url: ytDlUrl, title: ytTitle })
+          });
+          if (!resp.ok) throw new Error('下載失敗');
+          const blob = await resp.blob();
+          const blobUrl = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = blobUrl;
+          a.download = (ytTitle.replace(/[^\w\-. ]/g, '').slice(0, 80) || 'youtube') + '.mp4';
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(blobUrl);
+          downloadLabel.textContent = '下載完成';
+        } catch (err) {
+          downloadLabel.textContent = '下載失敗';
+          showError('YouTube 下載失敗，請稍後再試。');
+        }
+      };
+    } else {
+      downloadButton.onclick = null;
+    }
     if (downloadButton.dataset.external !== '1') downloadLabel.textContent = '下載影片';
     copyLinkButton.dataset.url = data.video.directUrl;
   } else {
