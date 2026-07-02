@@ -33,6 +33,7 @@ let analysisRequestId = 0;
 const HISTORY_KEY = 'xhs-html-downloader-history-v1';
 const AI_ACCESS_CODE_KEY = 'xhs-html-downloader-ai-access-code';
 let result = null;
+let resultData = null; // raw data from API
 let toastTimer = null;
 
 
@@ -140,6 +141,7 @@ function renderAnalysis(data) {
   analysisContent.classList.remove('is-hidden');
   analysisStatus.classList.add('is-done');
   analysisStatus.lastChild.textContent = '已完成';
+  retryAnalysisButton.textContent = '重新分析';
 
   $('analysisMode').textContent = analysisModeName(data.mode);
   $('analysisSummary').textContent = data.summary || '分析完成';
@@ -258,23 +260,25 @@ function iconDownload() {
 }
 
 
-function proxyUrl(raw) {
-  if (!raw || raw === '#') return '#';
-  return `/api/download?url=${encodeURIComponent(raw)}`;
-}
-
 function configureDownloadLink(link, url, directLabel) {
-  const proxy = proxyUrl(url);
-  link.href = proxy;
-  link.removeAttribute('target');
-  link.rel = '';
-  if (proxy !== '#') {
-    link.setAttribute('download', '');
-    link.dataset.external = '0';
-    if (link === downloadButton) downloadLabel.textContent = '下載';
-  } else {
-    link.dataset.external = '0';
+  link.href = url || '#';
+  let isExternal = false;
+  try {
+    isExternal = Boolean(url) && new URL(url, window.location.href).origin !== window.location.origin;
+  } catch {
+    isExternal = false;
+  }
+
+  link.dataset.external = isExternal ? '1' : '0';
+  if (isExternal) {
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
     link.removeAttribute('download');
+    if (link === downloadButton) downloadLabel.textContent = directLabel;
+  } else {
+    link.removeAttribute('target');
+    link.removeAttribute('rel');
+    link.setAttribute('download', '');
   }
 }
 
@@ -299,17 +303,158 @@ function renderImages(images) {
 
 function renderResult(data) {
   result = data;
+  resultData = data; // store raw data for format picker
   hideError();
   resultSection.classList.remove('is-hidden');
   mediaPlaceholder.classList.add('is-hidden');
   videoPlayer.classList.add('is-hidden');
   imageGrid.classList.add('is-hidden');
+  formatPicker.classList.add('is-hidden');
   videoPlayer.removeAttribute('src');
   videoPlayer.load();
 
   const isVideo = Boolean(data.video);
+  // Build format picker for YouTube
+  if (data.platform === 'youtube' && data.formats?.length > 0) {
+    const list = formatList;
+    list.textContent = '';
+    
+    // Helper: create download row
+    function createFormatRow(fmt) {
+      const row = document.createElement('div');
+      row.className = 'yt-format-row';
+      
+      const info = document.createElement('div');
+      info.className = 'yt-format-info';
+      
+      const label = document.createElement('span');
+      label.className = 'yt-format-label';
+      if (fmt.hasVideo) {
+        label.textContent = fmt.label;
+      } else {
+        label.textContent = fmt.label;
+      }
+      info.appendChild(label);
+      
+      if (fmt.size) {
+        const sizeEl = document.createElement('span');
+        sizeEl.className = 'yt-format-size';
+        sizeEl.textContent = fmt.size;
+        info.appendChild(sizeEl);
+      }
+      
+      // Show codec for video, abr for audio
+      if (fmt.hasVideo && fmt.vcodec) {
+        const codecEl = document.createElement('span');
+        codecEl.className = 'yt-format-codec';
+        const codecName = fmt.vcodec.replace(/^avc1\./, 'avc1/').replace(/^av01\./, 'av01/').replace(/\.\d+[a-zA-Z0-9]*$/, '').substring(0, 12);
+        codecEl.textContent = codecName;
+        info.appendChild(codecEl);
+      } else if (fmt.hasAudio && fmt.ext) {
+        const codecEl = document.createElement('span');
+        codecEl.className = 'yt-format-codec';
+        codecEl.textContent = fmt.ext === 'm4a' ? '.m4a' : `.${fmt.ext}`;
+        info.appendChild(codecEl);
+      }
+      
+      row.appendChild(info);
+      
+      const dlBtn = document.createElement('a');
+      dlBtn.className = 'yt-format-dl';
+      dlBtn.href = fmt.url;
+      dlBtn.target = '_blank';
+      dlBtn.rel = 'noopener noreferrer';
+      dlBtn.textContent = '下載';
+      dlBtn.addEventListener('click', (e) => {
+        // YouTube CDN URLs expire, so re-parse on each click
+        e.preventDefault();
+        dlBtn.textContent = '…';
+        dlBtn.style.pointerEvents = 'none';
+        const videoUrl = input.value.trim() || resultData?.sourceUrl;
+        if (!videoUrl) { showToast('請重新貼上 YouTube 連結'); dlBtn.textContent = '下載'; dlBtn.style.pointerEvents = ''; return; }
+        fetch('/api/youtube', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ text: videoUrl })
+        }).then(r => r.json()).then(payload => {
+          if (!payload.success || !payload.data) {
+            showToast('重新解析失敗，請稍後再試');
+            dlBtn.textContent = '下載';
+            dlBtn.style.pointerEvents = '';
+            return;
+          }
+          // Find matching format by height/abr
+          const freshFormats = payload.data.formats || [];
+          const matched = fmt.height
+            ? freshFormats.find(f => f.height === fmt.height)
+            : (fmt.abr ? freshFormats.find(f => f.abr === fmt.abr) : freshFormats[0]);
+          const targetUrl = matched?.url || payload.data.videoUrl;
+          if (targetUrl) {
+            window.open(targetUrl, '_blank', 'noopener,noreferrer');
+          } else {
+            showToast('此格式暫無可用連結，請嘗試其他');
+          }
+        }).catch(() => {
+          showToast('請求失敗，請稍後再試');
+        }).finally(() => {
+          dlBtn.textContent = '下載';
+          dlBtn.style.pointerEvents = '';
+        });
+      });
+      row.appendChild(dlBtn);
+      return row;
+    }
+    
+    // Audio section
+    const audioFormats = data.audioFormats || [];
+    const videoFormats = data.videoFormats || [];
+    
+    if (audioFormats.length > 0) {
+      const audioSection = document.createElement('div');
+      audioSection.className = 'yt-section';
+      const audioTitle = document.createElement('div');
+      audioTitle.className = 'yt-section-title';
+      audioTitle.textContent = '音訊';
+      audioSection.appendChild(audioTitle);
+      for (const fmt of audioFormats) {
+        audioSection.appendChild(createFormatRow(fmt));
+      }
+      list.appendChild(audioSection);
+    }
+    
+    // Video section
+    if (videoFormats.length > 0) {
+      const videoSection = document.createElement('div');
+      videoSection.className = 'yt-section';
+      const videoTitle = document.createElement('div');
+      videoTitle.className = 'yt-section-title';
+      videoTitle.textContent = '影片';
+      videoSection.appendChild(videoTitle);
+      for (const fmt of videoFormats) {
+        videoSection.appendChild(createFormatRow(fmt));
+      }
+      list.appendChild(videoSection);
+    }
+    
+    formatPicker.classList.remove('is-hidden');
+    const totalFormats = audioFormats.length + videoFormats.length;
+    $('countValue').textContent = `${totalFormats} 種格式`;
+  }
+
   if (isVideo) {
-    videoPlayer.src = data.video.previewUrl || data.video.directUrl;
+    // YouTube CDN URLs don't play in browser - show poster only
+    if (data.platform === 'youtube') {
+      videoPlayer.removeAttribute('src');
+      videoPlayer.load();
+      // Show a message overlay on the video element
+      const msg = document.createElement('div');
+      msg.className = 'yt-overlay-msg';
+      msg.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7L8 5Z"/></svg> 點下方按鈕下載影片';
+      mediaPanel.querySelector('.yt-overlay-msg')?.remove();
+      mediaPanel.appendChild(msg);
+    } else {
+      videoPlayer.src = data.video.previewUrl || data.video.directUrl;
+    }
     if (data.cover) videoPlayer.poster = data.cover;
     videoPlayer.classList.remove('is-hidden');
     configureDownloadLink(downloadButton, data.video.downloadUrl || data.video.directUrl, '開啟影片下載');
@@ -324,12 +469,23 @@ function renderResult(data) {
     copyLinkButton.dataset.url = first?.directUrl || '';
   }
 
+  // 縮圖下載按鈕 (vd6s-style thumbnail download)
+  coverDownloadButton.classList.toggle('is-hidden', !data.cover);
+  coverDownloadButton.dataset.url = data.cover || '';
+
   $('mediaType').textContent = isVideo ? '影片' : '圖片筆記';
   $('parserLabel').textContent = parserName(data.parser);
+  const platformLabel = $('platformLabel');
+  if (platformLabel) {
+    platformLabel.textContent = data.platform || '';
+    platformLabel.classList.toggle('is-hidden', !data.platform);
+  }
   $('resultTitle').textContent = data.title || '未命名作品';
   $('formatValue').textContent = data.format || (isVideo ? 'MP4' : '圖片');
   $('sizeValue').textContent = data.size || '未提供';
-  $('countValue').textContent = isVideo ? `1 部影片${data.alternatives?.length ? ` · ${data.alternatives.length} 個備選` : ''}` : `${data.images?.length || 0} 張圖片`;
+  if (!(data.platform === 'youtube' && data.formats?.length)) {
+    $('countValue').textContent = isVideo ? `1 部影片${data.alternatives?.length ? ` · ${data.alternatives.length} 個備選` : ''}` : `${data.images?.length || 0} 張圖片`;
+  }
 
   const authorLine = $('authorLine');
   if (data.author) {
@@ -351,7 +507,19 @@ function renderResult(data) {
 
   addHistory(data);
   resultSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  analyzeCurrentResult(data);
+  // 不自動觸發 AI 分析（避免無意間消耗 Token），使用者可點「開始分析」
+  analysisSection.classList.remove('is-hidden');
+  analysisLoading.classList.add('is-hidden');
+  analysisContent.classList.add('is-hidden');
+  analysisError.classList.remove('is-hidden');
+  analysisErrorText.textContent = '點擊下方按鈕開始文案分析（無 AI 金鑰時使用內建分析，不會消耗 Token）。';
+  analysisStatus.lastChild.textContent = '待分析';
+  analysisStatus.classList.remove('is-done');
+  retryAnalysisButton.textContent = '開始分析';
+}
+
+function isYouTubeLink(text) {
+  return /(?:youtube\.com|youtu\.be)/i.test(text);
 }
 
 async function parseCurrentInput() {
@@ -365,16 +533,31 @@ async function parseCurrentInput() {
   hideError();
   setLoading(true);
   try {
-    const response = await fetch('/api/parse', {
+    const isYT = isYouTubeLink(value);
+    const endpoint = isYT ? 'http://108.61.163.87:8799/api/yt-dlp' : '/api/parse';
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ text: value })
+      body: JSON.stringify({ url: value })
     });
     const payload = await response.json().catch(() => null);
     if (!response.ok || !payload?.success) {
       throw new Error(payload?.error || `伺服器回應錯誤：HTTP ${response.status}`);
     }
-    renderResult(payload.data);
+    // VPS yt-dlp server returns data at top level; wrap for renderResult
+    const parsed = isYT ? {
+      ...payload,
+      platform: 'youtube',
+      type: 'video',
+      parser: 'yt-dlp（VPS 直連）',
+      sourceUrl: value,
+      video: {
+        directUrl: payload.best_url || payload.video_formats?.[0]?.url || '',
+        downloadUrl: payload.best_url || payload.video_formats?.[0]?.url || '',
+      },
+      formats: payload.video_formats || [],
+    } : payload.data;
+    renderResult(parsed);
   } catch (error) {
     showError(error.message || '解析失敗，請稍後再試。');
   } finally {
@@ -531,9 +714,8 @@ function applyTheme(theme) {
 }
 
 downloadButton.addEventListener('click', () => {
-  if (!analysisResult && result) analyzeCurrentResult(result);
   if (downloadButton.dataset.external === '1') {
-    showToast('已開啟原始媒體，文案分析會在原頁繼續進行');
+    showToast('已開啟原始媒體');
   }
 });
 
@@ -593,6 +775,28 @@ clearAiAccessCodeButton.addEventListener('click', () => {
 
 aiAccessCodeInput.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') saveAiAccessCodeButton.click();
+});
+
+// 縮圖下載 (vd6s-inspired)
+coverDownloadButton.addEventListener('click', () => {
+  const url = coverDownloadButton.dataset.url;
+  if (!url) return;
+  const a = document.createElement('a');
+  a.href = url;
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  a.click();
+  showToast('已開啟封面圖片');
+});
+
+// 貼上自動解析 (vd6s-inspired onpaste auto-trigger)
+input.addEventListener('paste', () => {
+  setTimeout(() => {
+    const val = input.value.trim();
+    if (val.length > 0) {
+      parseCurrentInput();
+    }
+  }, 100);
 });
 
 const preferredTheme = localStorage.getItem('xhs-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
