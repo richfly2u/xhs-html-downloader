@@ -463,17 +463,44 @@ function renderResult(data) {
     if (data.cover) videoPlayer.poster = data.cover;
     videoPlayer.classList.remove('is-hidden');
     configureDownloadLink(downloadButton, data.video.downloadUrl || data.video.directUrl, '開啟影片下載');
-    // YouTube: direct download via /api/download proxy (Content-Disposition: attachment)
+    // YouTube: POST blob download via /api/dl-proxy (no URL encoding issues)
     if (data.platform === 'youtube') {
       const ytDlUrl = data.video.downloadUrl || data.video.directUrl;
-      downloadButton.href = '/api/download?url=' + encodeURIComponent(ytDlUrl);
+      const ytTitle = (data.title || 'youtube').replace(/[^\w\-. ]/g, '').slice(0, 80) || 'youtube';
+      downloadButton.href = '#';
       downloadButton.target = '';
       downloadButton.rel = '';
       downloadButton.removeAttribute('download');
       downloadButton.dataset.external = '0';
-      downloadButton.onclick = null;
       downloadLabel.textContent = '下載影片';
       copyLinkButton.dataset.url = ytDlUrl;
+      downloadButton.onclick = async (e) => {
+        e.preventDefault();
+        downloadLabel.textContent = '下載中…';
+        try {
+          const resp = await fetch('/api/dl-proxy', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ url: ytDlUrl }),
+          });
+          if (!resp.ok) throw new Error(await resp.text().catch(() => ''));
+          const blob = await resp.blob();
+          const blobUrl = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = blobUrl;
+          a.download = ytTitle + '.mp4';
+          a.style.display = 'none';
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(blobUrl);
+          downloadLabel.textContent = '下載完成';
+          setTimeout(() => { downloadLabel.textContent = '下載影片'; }, 3000);
+        } catch (err) {
+          downloadLabel.textContent = '下載失敗，請重試';
+          console.error('Download error:', err);
+        }
+      };
     } else {
       downloadButton.onclick = null;
     }
