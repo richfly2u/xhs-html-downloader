@@ -26,7 +26,7 @@ export default async function handler(req, res) {
     const vpsResp = await fetch(VPS_DL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: targetUrl, title: body.title || 'youtube' }),
+      body: JSON.stringify({ url: targetUrl, title: body.title || 'youtube', format: body.format || '' }),
       signal: AbortSignal.timeout(60000),
     });
 

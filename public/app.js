@@ -364,10 +364,13 @@ function renderResult(data) {
         const dlUrl = fmt.url || data.sourceUrl || input.value.trim();
         if (!dlUrl) { showToast('無下載連結'); btn.textContent = '下載'; btn.style.pointerEvents = ''; return; }
         try {
-          const isCDN = dlUrl.startsWith('http') && !dlUrl.includes('youtube.com/watch') && !dlUrl.includes('youtu.be');
-          const endpoint = isCDN ? '/api/download?url=' + encodeURIComponent(dlUrl) : '/api/dl-proxy';
-          const opts = isCDN ? {} : {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({url: dlUrl, title: data.title || 'youtube'})};
-          const resp = isCDN ? await fetch(endpoint) : await fetch(endpoint, opts);
+          // Always route through VPS dl-proxy -> yt-dlp for specific format
+          const formatArg = fmt.height ? `bestvideo[height<=${fmt.height}]+bestaudio/best[height<=${fmt.height}]` : (fmt.abr ? `bestaudio[abr<=${fmt.abr}]` : 'best');
+          const resp = await fetch('/api/dl-proxy', {
+            method:'POST',
+            headers:{'content-type':'application/json'},
+            body:JSON.stringify({url: data.sourceUrl || input.value.trim(), title: data.title || 'youtube', format: formatArg}),
+          });
           if (!resp.ok) { showToast('下載失敗'); btn.textContent = '下載'; btn.style.pointerEvents = ''; return; }
           const blob = await resp.blob();
           const url = URL.createObjectURL(blob);
