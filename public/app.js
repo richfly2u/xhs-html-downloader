@@ -13,6 +13,7 @@ const downloadButton = $('downloadButton');
 const downloadLabel = $('downloadLabel');
 const copyLinkButton = $('copyLinkButton');
 const copyTextButton = $('copyTextButton');
+const mediaPanel = $('mediaPanel');
 const historySection = $('historySection');
 const historyList = $('historyList');
 const formatPicker = $('formatPicker') || { classList: { add() {}, remove() {} } };
