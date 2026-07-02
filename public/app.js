@@ -361,30 +361,25 @@ function renderResult(data) {
         e.preventDefault();
         btn.textContent = '…';
         btn.style.pointerEvents = 'none';
+        const dlUrl = fmt.url || data.sourceUrl || input.value.trim();
+        if (!dlUrl) { showToast('無下載連結'); btn.textContent = '下載'; btn.style.pointerEvents = ''; return; }
         try {
-          const resp = await fetch('/api/dl-proxy', {
-            method: 'POST',
-            headers: {'content-type':'application/json'},
-            body: JSON.stringify({url: data.sourceUrl || input.value.trim(), title: data.title || 'youtube'}),
-          });
-          if (!resp.ok) { showToast('下載失敗'); return; }
+          const isCDN = dlUrl.startsWith('http') && !dlUrl.includes('youtube.com/watch') && !dlUrl.includes('youtu.be');
+          const endpoint = isCDN ? '/api/download?url=' + encodeURIComponent(dlUrl) : '/api/dl-proxy';
+          const opts = isCDN ? {} : {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({url: dlUrl, title: data.title || 'youtube'})};
+          const resp = isCDN ? await fetch(endpoint) : await fetch(endpoint, opts);
+          if (!resp.ok) { showToast('下載失敗'); btn.textContent = '下載'; btn.style.pointerEvents = ''; return; }
           const blob = await resp.blob();
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.href = url;
           const l = fmt.height ? `${fmt.height}p` : (fmt.abr ? `${fmt.abr}k` : '');
           a.download = ((data.title||'youtube').replace(/[^\w\-. ]/g,'').slice(0,50) + '_' + l + '.mp4').replace(/_+$/,'');
-          a.style.display = 'none';
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
+          a.style.display = 'none'; document.body.appendChild(a); a.click(); a.remove();
           URL.revokeObjectURL(url);
           showToast('下載完成');
-        } catch(e) {
-          showToast('下載失敗');
-        }
-        btn.textContent = '下載';
-        btn.style.pointerEvents = '';
+        } catch(e) { showToast('下載失敗'); }
+        btn.textContent = '下載'; btn.style.pointerEvents = '';
       });
       row.appendChild(btn);
       return row;
