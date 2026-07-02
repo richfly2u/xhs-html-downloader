@@ -582,27 +582,7 @@ async function parseCurrentInput() {
     if (!response.ok || !payload?.success) {
       throw new Error(payload?.error || `伺服器回應錯誤：HTTP ${response.status}`);
     }
-    // Wrap VPS yt-dlp format for renderResult
-    if (isYT && payload.data) {
-      renderResult(payload.data);
-    } else if (isYT) {
-      // VPS direct response (no data wrapper)
-      const parsed = {
-        ...payload,
-        platform: 'youtube',
-        type: 'video',
-        parser: 'yt-dlp（VPS 直連）',
-        sourceUrl: value,
-        video: {
-          directUrl: payload.best_url || payload.video_formats?.[0]?.url || '',
-          downloadUrl: payload.best_url || payload.video_formats?.[0]?.url || '',
-        },
-        formats: payload.video_formats || [],
-      };
-      renderResult(parsed);
-    } else {
-      renderResult(payload.data);
-    }
+    renderResult(payload.data);
   } catch (error) {
     showError(error.message || '解析失敗，請稍後再試。');
   } finally {
