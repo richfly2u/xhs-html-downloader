@@ -1,9 +1,10 @@
 /**
- * YouTube 媒體解析端點
- * 經 Vercel 後端 → VPS yt-dlp 伺服器（解決 mixed content + ytdl-core 相容性問題）
+ * YouTube 媒體解析端點 - 支援多格式
  * POST /api/youtube
- * Body: { text: "https://youtube.com/watch?v=..." }
+ * Body: { text: "https://youtube.com/..." }
  */
+const VPS_API = 'http://108.61.163.87:8799/api/yt-dlp';
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -12,51 +13,48 @@ export default async function handler(req, res) {
 
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'POST') {
-    res.setHeader('Allow', 'POST, OPTIONS');
-    return res.status(405).json({ success: false, error: '只接受 POST 請求' });
+    return res.status(405).json({ success: false, error: '只接受 POST' });
   }
 
   try {
-    const body = req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)
-      ? req.body
-      : JSON.parse(req.body?.toString?.() || '{}');
+    const body = typeof req.body === 'object' ? req.body : JSON.parse(req.body?.toString() || '{}');
     const input = (body.text || body.url || '').trim();
-    if (!input) {
-      return res.status(400).json({ success: false, error: '請提供 YouTube 連結' });
-    }
+    if (!input) return res.status(400).json({ success: false, error: '請提供 YouTube 連結' });
 
-    // Proxy to VPS yt-dlp server (backend-to-backend, no mixed content issue)
-    const vpsResp = await fetch('http://108.61.163.87:8799/api/yt-dlp', {
+    const vpsResp = await fetch(VPS_API, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url: input }),
-      signal: AbortSignal.timeout(25000),
+      signal: AbortSignal.timeout(30000),
     });
-
     const vpsData = await vpsResp.json();
     if (!vpsData.success) {
       return res.json({ success: false, error: vpsData.error || 'YouTube 解析失敗' });
     }
 
-    // Transform VPS format to frontend format
     const title = vpsData.title || 'YouTube 影片';
-    const bestUrl = vpsData.best_url || vpsData.video_formats?.[0]?.url || '';
-    const formats = (vpsData.video_formats || []).map(f => ({
+    const thumbnail = vpsData.thumbnail || '';
+    const videoFormats = (vpsData.video_formats || []).map(f => ({
       hasVideo: true,
-      label: f.height ? `${f.height}p` : f.id,
+      label: f.label || `${f.height || 0}p`,
       height: f.height || 0,
-      url: f.url,
-      size: f.size_mb ? `${f.size_mb} MB` : null,
+      fps: f.fps || '',
       ext: f.ext || 'mp4',
+      vcodec: f.vcodec || '',
+      acodec: f.acodec || '',
+      size: f.size_mb ? `${f.size_mb} MB` : null,
+      url: f.url || '',
     }));
     const audioFormats = (vpsData.audio_formats || []).map(f => ({
       hasAudio: true,
-      label: `${f.tbr || 128} kbps`,
-      abr: f.tbr || 128,
-      url: f.url,
-      size: f.size_mb ? `${f.size_mb} MB` : null,
+      label: f.label || `${f.abr || 0}k`,
+      abr: f.abr || 0,
       ext: f.ext || 'm4a',
+      acodec: f.acodec || '',
+      size: f.size_mb ? `${f.size_mb} MB` : null,
+      url: f.url || '',
     }));
+    const bestUrl = vpsData.best_url || videoFormats.find(f => f.url)?.url || '';
 
     return res.json({
       success: true,
@@ -65,23 +63,24 @@ export default async function handler(req, res) {
         title,
         description: '',
         author: '',
-        cover: vpsData.thumbnail || '',
+        cover: thumbnail,
         sourceUrl: input,
         parser: 'yt-dlp (VPS)',
         duration: vpsData.duration || 0,
-        duration_formatted: vpsData.duration ? `${Math.floor(vpsData.duration / 60)}:${String(vpsData.duration % 60).padStart(2, '0')}` : '',
         video: {
           previewUrl: bestUrl,
           directUrl: bestUrl,
           downloadUrl: bestUrl,
         },
-        formats: [...formats, ...audioFormats],
+        formats: [...videoFormats, ...audioFormats],
+        videoFormats,
+        audioFormats,
       },
     });
   } catch (e) {
     const msg = e?.message || '未知錯誤';
-    if (msg.includes('timed out') || msg.includes('Abort')) {
-      return res.json({ success: false, error: 'YouTube 解析超時，請稍後再試。' });
+    if (msg.includes('timed out') || e.name === 'TimeoutError') {
+      return res.json({ success: false, error: '解析超時，請稍後再試' });
     }
     return res.json({ success: false, error: `YouTube 解析失敗：${msg}` });
   }
