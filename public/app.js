@@ -362,25 +362,9 @@ function renderResult(data) {
         btn.textContent = '…';
         btn.style.pointerEvents = 'none';
         const dlUrl = fmt.url || data.sourceUrl || input.value.trim();
-        if (!dlUrl) { showToast('無下載連結'); btn.textContent = '下載'; btn.style.pointerEvents = ''; return; }
-        try {
-          // Use CDN URL directly via Vercel download proxy (freshest, no VPS yt-dlp needed)
-          const isYTpage = dlUrl.includes('youtube.com/watch') || dlUrl.includes('youtu.be');
-          const endpoint = isYTpage ? '/api/dl-proxy' : '/api/download?url=' + encodeURIComponent(dlUrl);
-          const opts = isYTpage ? {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({url: dlUrl, title: data.title || 'youtube'})} : {};
-          const resp = isYTpage ? await fetch(endpoint, opts) : await fetch(endpoint);
-          if (!resp.ok) { showToast('下載失敗'); btn.textContent = '下載'; btn.style.pointerEvents = ''; return; }
-          const blob = await resp.blob();
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          const l = fmt.height ? `${fmt.height}p` : (fmt.abr ? `${fmt.abr}k` : '');
-          a.download = ((data.title||'youtube').replace(/[^\w\-. ]/g,'').slice(0,50) + '_' + l + '.mp4').replace(/_+$/,'');
-          a.style.display = 'none'; document.body.appendChild(a); a.click(); a.remove();
-          URL.revokeObjectURL(url);
-          showToast('下載完成');
-        } catch(e) { showToast('下載失敗'); }
-        btn.textContent = '下載'; btn.style.pointerEvents = '';
+        if (!dlUrl) { showToast('無下載連結'); return; }
+        // Open in new tab for download
+        window.open('/api/download?url=' + encodeURIComponent(dlUrl), '_blank');
       });
       row.appendChild(btn);
       return row;
@@ -434,8 +418,7 @@ function renderResult(data) {
     configureDownloadLink(downloadButton, data.video.downloadUrl || data.video.directUrl, '開啟影片下載');
     // YouTube: POST blob download via /api/dl-proxy (no URL encoding issues)
     if (data.platform === 'youtube') {
-      const ytDlUrl = data.sourceUrl; // original YouTube URL, not CDN
-      const ytTitle = (data.title || 'youtube').replace(/[^\w\-. ]/g, '').slice(0, 80) || 'youtube';
+      const ytDlUrl = data.sourceUrl;
       downloadButton.href = '#';
       downloadButton.target = '';
       downloadButton.rel = '';
@@ -443,32 +426,11 @@ function renderResult(data) {
       downloadButton.dataset.external = '0';
       downloadLabel.textContent = '下載影片';
       copyLinkButton.dataset.url = ytDlUrl;
-      downloadButton.onclick = async (e) => {
+      downloadButton.onclick = (e) => {
         e.preventDefault();
-        downloadLabel.textContent = '下載中…';
-        try {
-          const resp = await fetch('/api/dl-proxy', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ url: ytDlUrl }),
-          });
-          if (!resp.ok) throw new Error(await resp.text().catch(() => ''));
-          const blob = await resp.blob();
-          const blobUrl = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = blobUrl;
-          a.download = ytTitle + '.mp4';
-          a.style.display = 'none';
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-          URL.revokeObjectURL(blobUrl);
-          downloadLabel.textContent = '下載完成';
-          setTimeout(() => { downloadLabel.textContent = '下載影片'; }, 3000);
-        } catch (err) {
-          downloadLabel.textContent = '下載失敗，請重試';
-          console.error('Download error:', err);
-        }
+        downloadLabel.textContent = '準備下載…';
+        window.open('/api/dl-proxy?url=' + encodeURIComponent(ytDlUrl), '_blank');
+        setTimeout(() => { downloadLabel.textContent = '下載影片'; }, 2000);
       };
     } else {
       downloadButton.onclick = null;
