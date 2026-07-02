@@ -566,7 +566,7 @@ async function parseCurrentInput() {
   setLoading(true);
   try {
     const isYT = isYouTubeLink(value);
-    const endpoint = isYT ? 'http://108.61.163.87:8799/api/yt-dlp' : '/api/parse';
+    const endpoint = isYT ? '/api/youtube' : '/api/parse';
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -576,20 +576,27 @@ async function parseCurrentInput() {
     if (!response.ok || !payload?.success) {
       throw new Error(payload?.error || `伺服器回應錯誤：HTTP ${response.status}`);
     }
-    // VPS yt-dlp server returns data at top level; wrap for renderResult
-    const parsed = isYT ? {
-      ...payload,
-      platform: 'youtube',
-      type: 'video',
-      parser: 'yt-dlp（VPS 直連）',
-      sourceUrl: value,
-      video: {
-        directUrl: payload.best_url || payload.video_formats?.[0]?.url || '',
-        downloadUrl: payload.best_url || payload.video_formats?.[0]?.url || '',
-      },
-      formats: payload.video_formats || [],
-    } : payload.data;
-    renderResult(parsed);
+    // Wrap VPS yt-dlp format for renderResult
+    if (isYT && payload.data) {
+      renderResult(payload.data);
+    } else if (isYT) {
+      // VPS direct response (no data wrapper)
+      const parsed = {
+        ...payload,
+        platform: 'youtube',
+        type: 'video',
+        parser: 'yt-dlp（VPS 直連）',
+        sourceUrl: value,
+        video: {
+          directUrl: payload.best_url || payload.video_formats?.[0]?.url || '',
+          downloadUrl: payload.best_url || payload.video_formats?.[0]?.url || '',
+        },
+        formats: payload.video_formats || [],
+      };
+      renderResult(parsed);
+    } else {
+      renderResult(payload.data);
+    }
   } catch (error) {
     showError(error.message || '解析失敗，請稍後再試。');
   } finally {
