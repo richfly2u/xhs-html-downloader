@@ -320,130 +320,103 @@ function renderResult(data) {
 
   const isVideo = Boolean(data.video);
   // Build format picker for YouTube
-  if (data.platform === 'youtube' && data.formats?.length > 0 && formatList) {
-    const list = formatList;
-    list.textContent = '';
-    
-    // Helper: create download row
-    function createFormatRow(fmt) {
+  if (data.platform === 'youtube' && (data.videoFormats?.length > 0 || data.audioFormats?.length > 0)) {
+    // Create or find format picker container
+    let formatContainer = document.getElementById('ytFormatPicker');
+    if (!formatContainer) {
+      formatContainer = document.createElement('div');
+      formatContainer.id = 'ytFormatPicker';
+      formatContainer.className = 'yt-format-picker';
+      // Insert after video player or result section
+      const insertAfter = videoPlayer.parentElement || resultSection;
+      insertAfter.parentElement.insertBefore(formatContainer, insertAfter.nextSibling);
+    }
+    formatContainer.textContent = '';
+    const title = document.createElement('div');
+    title.className = 'yt-section-title';
+    title.textContent = '選擇格式下載';
+    formatContainer.appendChild(title);
+
+    // Helper: create format row
+    function createRow(fmt) {
       const row = document.createElement('div');
       row.className = 'yt-format-row';
-      
       const info = document.createElement('div');
       info.className = 'yt-format-info';
-      
       const label = document.createElement('span');
       label.className = 'yt-format-label';
-      if (fmt.hasVideo) {
-        label.textContent = fmt.label;
-      } else {
-        label.textContent = fmt.label;
-      }
+      label.textContent = fmt.hasVideo ? (fmt.label || `${fmt.height}p`) : (fmt.label || `${fmt.abr}k`);
       info.appendChild(label);
-      
       if (fmt.size) {
-        const sizeEl = document.createElement('span');
-        sizeEl.className = 'yt-format-size';
-        sizeEl.textContent = fmt.size;
-        info.appendChild(sizeEl);
+        const sz = document.createElement('span');
+        sz.className = 'yt-format-size';
+        sz.textContent = fmt.size;
+        info.appendChild(sz);
       }
-      
-      // Show codec for video, abr for audio
-      if (fmt.hasVideo && fmt.vcodec) {
-        const codecEl = document.createElement('span');
-        codecEl.className = 'yt-format-codec';
-        const codecName = fmt.vcodec.replace(/^avc1\./, 'avc1/').replace(/^av01\./, 'av01/').replace(/\.\d+[a-zA-Z0-9]*$/, '').substring(0, 12);
-        codecEl.textContent = codecName;
-        info.appendChild(codecEl);
-      } else if (fmt.hasAudio && fmt.ext) {
-        const codecEl = document.createElement('span');
-        codecEl.className = 'yt-format-codec';
-        codecEl.textContent = fmt.ext === 'm4a' ? '.m4a' : `.${fmt.ext}`;
-        info.appendChild(codecEl);
-      }
-      
       row.appendChild(info);
-      
-      const dlBtn = document.createElement('a');
-      dlBtn.className = 'yt-format-dl';
-      dlBtn.href = fmt.url;
-      dlBtn.target = '_blank';
-      dlBtn.rel = 'noopener noreferrer';
-      dlBtn.textContent = '下載';
-      dlBtn.addEventListener('click', (e) => {
-        // YouTube CDN URLs expire, so re-parse on each click
+      const btn = document.createElement('a');
+      btn.className = 'yt-format-dl';
+      btn.textContent = '下載';
+      btn.addEventListener('click', async (e) => {
         e.preventDefault();
-        dlBtn.textContent = '…';
-        dlBtn.style.pointerEvents = 'none';
-        const videoUrl = input.value.trim() || resultData?.sourceUrl;
-        if (!videoUrl) { showToast('請重新貼上 YouTube 連結'); dlBtn.textContent = '下載'; dlBtn.style.pointerEvents = ''; return; }
-        fetch('/api/youtube', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ text: videoUrl })
-        }).then(r => r.json()).then(payload => {
-          if (!payload.success || !payload.data) {
-            showToast('重新解析失敗，請稍後再試');
-            dlBtn.textContent = '下載';
-            dlBtn.style.pointerEvents = '';
-            return;
-          }
-          // Find matching format by height/abr
-          const freshFormats = payload.data.formats || [];
-          const matched = fmt.height
-            ? freshFormats.find(f => f.height === fmt.height)
-            : (fmt.abr ? freshFormats.find(f => f.abr === fmt.abr) : freshFormats[0]);
-          const targetUrl = matched?.url || payload.data.videoUrl;
-          if (targetUrl) {
-            window.open(targetUrl, '_blank', 'noopener,noreferrer');
-          } else {
-            showToast('此格式暫無可用連結，請嘗試其他');
-          }
-        }).catch(() => {
-          showToast('請求失敗，請稍後再試');
-        }).finally(() => {
-          dlBtn.textContent = '下載';
-          dlBtn.style.pointerEvents = '';
-        });
+        btn.textContent = '…';
+        btn.style.pointerEvents = 'none';
+        try {
+          const resp = await fetch('/api/dl-proxy', {
+            method: 'POST',
+            headers: {'content-type':'application/json'},
+            body: JSON.stringify({url: data.sourceUrl || input.value.trim(), title: data.title || 'youtube'}),
+          });
+          if (!resp.ok) { showToast('下載失敗'); return; }
+          const blob = await resp.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          const l = fmt.height ? `${fmt.height}p` : (fmt.abr ? `${fmt.abr}k` : '');
+          a.download = ((data.title||'youtube').replace(/[^\w\-. ]/g,'').slice(0,50) + '_' + l + '.mp4').replace(/_+$/,'');
+          a.style.display = 'none';
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+          showToast('下載完成');
+        } catch(e) {
+          showToast('下載失敗');
+        }
+        btn.textContent = '下載';
+        btn.style.pointerEvents = '';
       });
-      row.appendChild(dlBtn);
+      row.appendChild(btn);
       return row;
     }
-    
+
     // Audio section
-    const audioFormats = data.audioFormats || [];
-    const videoFormats = data.videoFormats || [];
-    
-    if (audioFormats.length > 0) {
-      const audioSection = document.createElement('div');
-      audioSection.className = 'yt-section';
-      const audioTitle = document.createElement('div');
-      audioTitle.className = 'yt-section-title';
-      audioTitle.textContent = '音訊';
-      audioSection.appendChild(audioTitle);
-      for (const fmt of audioFormats) {
-        audioSection.appendChild(createFormatRow(fmt));
-      }
-      list.appendChild(audioSection);
+    const aFmts = data.audioFormats || [];
+    if (aFmts.length > 0) {
+      const sec = document.createElement('div');
+      sec.className = 'yt-section';
+      const st = document.createElement('div');
+      st.className = 'yt-sub-title';
+      st.textContent = '🎵 音訊';
+      sec.appendChild(st);
+      aFmts.forEach(f => sec.appendChild(createRow(f)));
+      formatContainer.appendChild(sec);
     }
-    
+
     // Video section
-    if (videoFormats.length > 0) {
-      const videoSection = document.createElement('div');
-      videoSection.className = 'yt-section';
-      const videoTitle = document.createElement('div');
-      videoTitle.className = 'yt-section-title';
-      videoTitle.textContent = '影片';
-      videoSection.appendChild(videoTitle);
-      for (const fmt of videoFormats) {
-        videoSection.appendChild(createFormatRow(fmt));
-      }
-      list.appendChild(videoSection);
+    const vFmts = data.videoFormats || [];
+    if (vFmts.length > 0) {
+      const sec = document.createElement('div');
+      sec.className = 'yt-section';
+      const st = document.createElement('div');
+      st.className = 'yt-sub-title';
+      st.textContent = '🎬 影片';
+      sec.appendChild(st);
+      vFmts.forEach(f => sec.appendChild(createRow(f)));
+      formatContainer.appendChild(sec);
     }
-    
-    formatPicker?.classList.remove('is-hidden');
-    const totalFormats = audioFormats.length + videoFormats.length;
-    $('countValue').textContent = `${totalFormats} 種格式`;
+
+    $('countValue').textContent = `${aFmts.length + vFmts.length} 種格式`;
   }
 
   if (isVideo) {
