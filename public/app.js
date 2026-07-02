@@ -465,7 +465,7 @@ function renderResult(data) {
     configureDownloadLink(downloadButton, data.video.downloadUrl || data.video.directUrl, '開啟影片下載');
     // YouTube: POST blob download via /api/dl-proxy (no URL encoding issues)
     if (data.platform === 'youtube') {
-      const ytDlUrl = data.video.downloadUrl || data.video.directUrl;
+      const ytDlUrl = data.sourceUrl; // original YouTube URL, not CDN
       const ytTitle = (data.title || 'youtube').replace(/[^\w\-. ]/g, '').slice(0, 80) || 'youtube';
       downloadButton.href = '#';
       downloadButton.target = '';
