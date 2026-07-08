@@ -71,9 +71,14 @@ export async function resolveForPlatform(inputText, options) {
   const platform = detectPlatform(parsed.hostname);
   if (!platform) throw new Error('不支援的平台或網域');
 
-  // If direct media URL, handle it generically
-  if (platform.isMediaHost?.(parsed.hostname)) {
-    const isVideo = /\.mp4(?:$|\?)/i.test(parsed.pathname + parsed.search) || /video|stream/i.test(parsed.pathname);
+  // If direct media URL, handle it generically.
+  const isDirectMedia = typeof platform.isDirectMediaUrl === 'function'
+    ? platform.isDirectMediaUrl(parsed)
+    : platform.isMediaHost?.(parsed.hostname);
+  if (isDirectMedia) {
+    const isVideo = typeof platform.isVideoDirectUrl === 'function'
+      ? platform.isVideoDirectUrl(parsed)
+      : /\.mp4(?:$|\?)/i.test(parsed.pathname + parsed.search) || /video|stream/i.test(parsed.pathname);
     return {
       platform: platform.name,
       sourceUrl: parsed.toString(),
