@@ -1,11 +1,11 @@
 <!doctype html>
-<html lang="zh-Hant">
+<html lang="zh-Hant" data-theme="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#f64f63">
+  <meta name="theme-color" content="#171416">
   <meta name="description" content="貼上小紅書、抖音、TikTok、YouTube、Facebook 分享連結，解析影片、圖片與文案。">
-  <title>小紅書媒體解析器</title>
+  <title>全平台媒體解析器</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="stylesheet" href="/styles.css">
@@ -21,7 +21,7 @@
       <span class="brand-mark" aria-hidden="true">
         <svg viewBox="0 0 24 24"><path d="M8.1 5.2c0-1.5 1.7-2.4 2.9-1.5l8.2 6.3c1 .8 1 2.3 0 3.1L11 19.4c-1.2.9-2.9 0-2.9-1.5V5.2Z"/></svg>
       </span>
-      <span><strong>紅媒體</strong><small>公開分享解析器</small></span>
+      <span><strong>全平台</strong><small>公開分享解析器</small></span>
     </a>
     <button class="icon-button" id="themeButton" type="button" aria-label="切換深色模式" title="切換深色模式">
       <svg class="sun-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3V1m0 22v-2m9-9h2M1 12h2m16.4-7.4 1.4-1.4M3.2 20.8l1.4-1.4m14.8 0 1.4 1.4M3.2 3.2l1.4 1.4M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10Z"/></svg>
@@ -32,7 +32,7 @@
     <section class="hero">
       <div class="eyebrow"><span></span> HTML 網頁版</div>
       <h1>貼上連結，<em>提取影片、圖片與文案</em></h1>
-      <p>支援小紅書、抖音、TikTok、YouTube 等公開分享連結與媒體直連。無需額外 App，電腦與手機瀏覽器皆可操作。</p>
+      <p>支援小紅書、抖音、TikTok、YouTube、Facebook 等公開分享連結與媒體直連。無需額外 App，電腦與手機瀏覽器皆可操作。</p>
     </section>
 
     <section class="parse-card" aria-labelledby="parse-title">
@@ -228,7 +228,7 @@
       <div class="how-icon">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9M12 8v5l3 2m2-12v5h5"/></svg>
       </div>
-      <div><h2>解析方式</h2><p>後端先展開分享短網址，再從公開頁面的結構化資料與媒體標籤中尋找小紅書 CDN 資源。若頁面要求登入或出現驗證，工具不會嘗試繞過。</p></div>
+      <div><h2>解析方式</h2><p>後端先判斷平台並展開分享短網址，再從公開頁面的結構化資料與媒體標籤中尋找可解析資源。若頁面要求登入或出現驗證，工具不會嘗試繞過。</p></div>
     </section>
   </main>
 

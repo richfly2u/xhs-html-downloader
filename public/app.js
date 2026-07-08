@@ -774,7 +774,7 @@ input.addEventListener('paste', () => {
   }, 100);
 });
 
-const preferredTheme = localStorage.getItem('xhs-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+const preferredTheme = localStorage.getItem('xhs-theme') || 'dark';
 applyTheme(preferredTheme);
 updateCounter();
 renderHistory();
