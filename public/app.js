@@ -259,6 +259,48 @@ function iconDownload() {
   return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 20h14"/></svg>';
 }
 
+function formatKindLabel(fmt) {
+  if (fmt.hasVideo && fmt.hasAudio) return '影音';
+  if (fmt.hasVideo) return '僅影片';
+  if (fmt.hasAudio) return '僅音訊';
+  return '媒體';
+}
+
+function renderFormatButtonContent(btn, fmt, isLoading = false) {
+  btn.textContent = '';
+  if (isLoading) {
+    const loading = document.createElement('span');
+    loading.className = 'fmt-loading';
+    loading.textContent = '取得連結中...';
+    btn.appendChild(loading);
+    return;
+  }
+
+  const main = document.createElement('span');
+  main.className = 'fmt-main';
+  const quality = document.createElement('strong');
+  quality.textContent = fmt.label || (fmt.height ? `${fmt.height}p` : '音訊');
+  const kind = document.createElement('span');
+  kind.className = 'fmt-kind';
+  kind.textContent = formatKindLabel(fmt);
+  main.append(quality, kind);
+
+  const details = document.createElement('span');
+  details.className = 'fmt-details';
+  const codec = fmt.codec || fmt.ext || '';
+  details.textContent = codec ? codec.toUpperCase() : '格式';
+
+  const size = document.createElement('span');
+  size.className = 'fmt-size';
+  size.textContent = fmt.size || '大小未知';
+
+  const action = document.createElement('span');
+  action.className = 'fmt-action';
+  action.textContent = '下載';
+
+  btn.append(main, details, size, action);
+}
+
 
 function configureDownloadLink(link, url, directLabel) {
   link.href = url || '#';
@@ -336,11 +378,13 @@ function renderResult(data) {
         meta.textContent = '僅音訊';
         btn.appendChild(meta);
       }
+      renderFormatButtonContent(btn, fmt);
       btn.addEventListener('click', async () => {
         formatList.querySelectorAll('.format-btn').forEach((b) => b.classList.remove('is-active'));
         btn.classList.add('is-active');
         btn.disabled = true;
         btn.textContent = '取得中…';
+        renderFormatButtonContent(btn, fmt, true);
         selectedFormat = fmt;
         try {
           // Re-parse to get a fresh CDN URL (YouTube URLs expire within minutes)
@@ -375,6 +419,7 @@ function renderResult(data) {
           const label = document.createElement('span');
           label.textContent = fmt.label;
           btn.appendChild(label);
+          renderFormatButtonContent(btn, fmt);
         }
       });
       list.appendChild(btn);

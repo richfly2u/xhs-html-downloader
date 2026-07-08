@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ytdl from '@distube/ytdl-core';
 import { Innertube } from 'youtubei.js';
-import { assertHttpUrl, assertPublicResolution, extractFirstUrl } from '../utils.js';
+import { assertHttpUrl, assertPublicResolution, extractFirstUrl, formatBytes } from '../utils.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // 依優先順序找 yt-dlp 二進位
@@ -169,13 +169,7 @@ export function parseWatchPage(html, finalUrl) {
                     h >= 720  ? '720p' :
                     h >= 480  ? '480p' :
                     h >= 360  ? '360p' : '240p';
-      formatList.push({
-        label,
-        height: h,
-        url: f.url,
-        hasAudio: Boolean(f.audioChannels || f.audioBitrate),
-        hasVideo: Boolean(f.width || f.height)
-      });
+      formatList.push(normalizeFormat(f));
     }
 
     cover = playerData?.videoDetails?.thumbnail?.thumbnails?.slice(-1)[0]?.url ||
@@ -234,20 +228,56 @@ function pickFormat(formats) {
     || formats.find((f) => f.url);
 }
 
+function formatCodec(value) {
+  if (!value || value === 'none') return null;
+  return String(value).split('.')[0].toUpperCase();
+}
+
+function formatSize(value) {
+  const bytes = Number(value);
+  return Number.isFinite(bytes) && bytes > 0 ? formatBytes(bytes) : null;
+}
+
+function qualityLabel(height = 0, fallback = '') {
+  const h = Number(height) || 0;
+  if (!h && fallback) return String(fallback);
+  return h >= 2160 ? `${Math.round(h / 1000)}K` :
+    h >= 1440 ? '1440p' :
+    h >= 1080 ? '1080p' :
+    h >= 720 ? '720p' :
+    h >= 480 ? '480p' :
+    h >= 360 ? '360p' :
+    h > 0 ? `${h}p` : '音訊';
+}
+
+function normalizeFormat(f) {
+  const height = Number(f.height) || 0;
+  const hasAudio = Boolean(f.hasAudio || f.audioChannels || f.audioBitrate || (f.acodec && f.acodec !== 'none'));
+  const hasVideo = Boolean(f.hasVideo || f.width || f.height || (f.vcodec && f.vcodec !== 'none'));
+  return {
+    label: qualityLabel(height, f.qualityLabel || f.quality),
+    height,
+    url: f.url,
+    hasAudio,
+    hasVideo,
+    size: formatSize(f.contentLength || f.filesize || f.filesize_approx),
+    codec: [formatCodec(f.vcodec || f.mimeType?.match(/codecs="([^"]+)/)?.[1]), formatCodec(f.acodec)]
+      .filter(Boolean)
+      .join(' / ') || null,
+    ext: f.container || f.ext || f.mimeType?.match(/video\/([^;]+)/)?.[1] || f.mimeType?.match(/audio\/([^;]+)/)?.[1] || null
+  };
+}
+
 function collectFormats(formats) {
   if (!formats?.length) return [];
   const seen = new Set(), result = [];
   for (const f of formats) {
     if (!f.url) continue;
-    const h = f.height || 0;
-    const key = `${h}p`;
+    const item = normalizeFormat(f);
+    const key = item.hasVideo ? `${item.height}p` : `audio-${item.codec || item.ext || result.length}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    const label = h >= 2160 ? `${Math.round(h / 1000)}K` :
-                  h >= 1440 ? '1440p' : h >= 1080 ? '1080p' :
-                  h >= 720 ? '720p' : h >= 480 ? '480p' :
-                  h >= 360 ? '360p' : '240p';
-    result.push({ label, height: h, url: f.url, hasAudio: Boolean(f.hasAudio || f.audioChannels), hasVideo: Boolean(f.hasVideo || f.width) });
+    result.push(item);
   }
   return result;
 }
@@ -330,7 +360,7 @@ export async function resolveShare(inputText, options) {
                           h >= 360  ? '360p' : '240p';
             result.formats = result.formats || [];
             if (!result.formats.some((e) => e.label === label)) {
-              result.formats.push({ label, height: h, url: f.url, hasAudio: Boolean(f.acodec && f.acodec !== 'none'), hasVideo: Boolean(f.vcodec && f.vcodec !== 'none') });
+              result.formats.push(normalizeFormat(f));
             }
           }
         }
@@ -380,7 +410,7 @@ export async function resolveShare(inputText, options) {
                           h >= 360  ? '360p' : '240p';
             result.formats = result.formats || [];
             if (!result.formats.some((e) => e.label === label)) {
-              result.formats.push({ label, height: h, url: f.url, hasAudio: Boolean(f.hasAudio), hasVideo: Boolean(f.hasVideo) });
+              result.formats.push(normalizeFormat(f));
             }
           }
         }
