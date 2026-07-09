@@ -1,6 +1,9 @@
 import 'dotenv/config';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createReadStream, existsSync } from 'node:fs';
+import { mkdtemp, readdir, rm, stat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import cors from 'cors';
@@ -12,7 +15,6 @@ import { analyzeCopy } from './analyzer.js';
 import { fetchThumbnail } from './thumbnail.js';
 import { extractVideoId } from './platforms/youtube.js';
 import { execFile, spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
 import {
   assertHttpUrl,
   assertPublicResolution,
@@ -38,6 +40,7 @@ const mediaProxyEnabled = String(process.env.ENABLE_MEDIA_PROXY ?? mediaProxyDef
 // yt-dlp 二進位路徑（供 /api/media 代理 YouTube 串流用）
 const __ytdlpBin = path.resolve(__dirname, '../node_modules/.bin/yt-dlp' + (process.platform === 'win32' ? '.exe' : ''));
 const YTDLP_BIN = existsSync(__ytdlpBin) ? __ytdlpBin : 'yt-dlp';
+const DEFAULT_YOUTUBE_COOKIES_PATH = path.resolve(__dirname, '../.secrets/youtube-cookies.txt');
 
 if (process.env.VERCEL || process.env.RAILWAY_ENVIRONMENT || String(process.env.TRUST_PROXY || 'false').toLowerCase() === 'true') {
   app.set('trust proxy', 1);
@@ -87,6 +90,26 @@ function mediaProxyUrl(req, directUrl, { download = false, filename = 'media' } 
   if (download) query.set('download', '1');
   if (filename) query.set('name', filename);
   return `${req.protocol}://${req.get('host')}/api/media?${query.toString()}`;
+}
+
+function ytdlpCookieArgs() {
+  const cookiePath = process.env.YTDLP_COOKIES_PATH ||
+    process.env.YOUTUBE_COOKIES_PATH ||
+    DEFAULT_YOUTUBE_COOKIES_PATH;
+  return cookiePath && existsSync(cookiePath) ? ['--cookies', cookiePath] : [];
+}
+
+function isSafeYtdlpFormat(value) {
+  return /^[a-zA-Z0-9_+.,:[\]\-<=/]+$/.test(value);
+}
+
+function youtubeDownloadUrl(req, sourceUrl, format, { filename = 'youtube.mp4' } = {}) {
+  const query = new URLSearchParams({
+    url: sourceUrl,
+    format,
+    name: filename
+  });
+  return `/api/youtube-download?${query.toString()}`;
 }
 
 app.get('/health', (_req, res) => {
@@ -152,6 +175,18 @@ app.post('/api/parse', parseLimiter, async (req, res) => {
       previewUrl: mediaProxyUrl(req, url) || url,
       downloadUrl: mediaProxyUrl(req, url, { download: true, filename: `${baseName}-${index + 1}.jpg` }) || url
     }));
+    const formats = data.platform === 'youtube'
+      ? (data.formats || []).map((item) => {
+          const ext = item.hasVideo ? 'mp4' : (item.ext || 'm4a');
+          const filename = `${baseName}-${item.label || item.id || 'format'}.${ext}`;
+          return {
+            ...item,
+            url: item.downloadFormat
+              ? youtubeDownloadUrl(req, data.sourceUrl, item.downloadFormat, { filename })
+              : item.url
+          };
+        })
+      : data.formats;
 
     return res.json({
       success: true,
@@ -159,6 +194,7 @@ app.post('/api/parse', parseLimiter, async (req, res) => {
         ...data,
         video,
         images,
+        formats,
         format: video ? 'MP4' : (images.length ? '圖片' : null),
         bytes: probe.bytes,
         size: formatBytes(probe.bytes),
@@ -170,6 +206,81 @@ app.post('/api/parse', parseLimiter, async (req, res) => {
     const message = error instanceof Error ? error.message : '解析失敗';
     const status = error?.code === 'MEDIA_NOT_FOUND' ? 422 : 400;
     return res.status(status).json({ success: false, error: message });
+  }
+});
+
+app.get('/api/youtube-download', mediaLimiter, async (req, res) => {
+  let tempDir = null;
+  try {
+    const rawUrl = String(req.query.url || '');
+    const sourceUrl = assertHttpUrl(rawUrl);
+    if (!extractVideoId(sourceUrl.toString())) {
+      return res.status(400).json({ success: false, error: '不是有效的 YouTube 影片連結' });
+    }
+    await assertPublicResolution(sourceUrl.hostname);
+
+    const format = String(req.query.format || 'bestvideo+bestaudio/best');
+    if (!isSafeYtdlpFormat(format)) {
+      return res.status(400).json({ success: false, error: '不支援的下載格式' });
+    }
+
+    const requestedName = safeFilename(String(req.query.name || 'youtube.mp4'), 'youtube.mp4');
+    const extension = requestedName.includes('.') ? requestedName.split('.').pop() : 'mp4';
+    tempDir = await mkdtemp(path.join(tmpdir(), 'xhs-youtube-'));
+    const outputTemplate = path.join(tempDir, 'media.%(ext)s');
+    const args = [
+      sourceUrl.toString(),
+      '-f', format,
+      '--no-playlist',
+      '--no-warnings',
+      '-o', outputTemplate,
+      ...ytdlpCookieArgs()
+    ];
+    if (extension === 'mp4') args.splice(5, 0, '--merge-output-format', 'mp4');
+
+    const child = spawn(YTDLP_BIN, args, { windowsHide: true });
+    let stderr = '';
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+      if (stderr.length > 1200) stderr = stderr.slice(-1200);
+    });
+
+    const timeoutTimer = setTimeout(() => child.kill(), mediaTimeoutMs);
+    const code = await new Promise((resolve, reject) => {
+      child.on('error', reject);
+      child.on('close', resolve);
+    });
+    clearTimeout(timeoutTimer);
+    if (code !== 0) {
+      throw new Error(stderr.trim() || `yt-dlp 退出碼 ${code}`);
+    }
+
+    const files = await readdir(tempDir);
+    const file = files.find((name) => !name.endsWith('.part'));
+    if (!file) throw new Error('下載完成但找不到輸出檔');
+
+    const filePath = path.join(tempDir, file);
+    const info = await stat(filePath);
+    const finalName = requestedName.includes('.') ? requestedName : `${requestedName}.${extension}`;
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(finalName)}`);
+    const outputExt = file.includes('.') ? file.split('.').pop().toLowerCase() : extension;
+    const contentType = outputExt === 'm4a' ? 'audio/mp4' :
+      outputExt === 'webm' ? 'audio/webm' :
+      outputExt === 'mp3' ? 'audio/mpeg' :
+      'video/mp4';
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Length', String(info.size));
+    res.setHeader('Cache-Control', 'no-store');
+    await pipeline(createReadStream(filePath), res);
+  } catch (error) {
+    if (!res.headersSent) {
+      const message = error instanceof Error ? error.message : 'YouTube 下載失敗';
+      res.status(502).json({ success: false, error: message });
+    }
+  } finally {
+    if (tempDir) {
+      rm(tempDir, { recursive: true, force: true }).catch(() => {});
+    }
   }
 });
 

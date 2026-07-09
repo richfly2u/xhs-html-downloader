@@ -151,18 +151,9 @@ textarea::placeholder { color: color-mix(in srgb, var(--muted) 72%, transparent)
 .result-actions .button-ghost { min-height: 43px; }
 
 .format-picker {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  background: linear-gradient(transparent, rgba(16,14,15,.96) 24%);
-  padding: 44px 14px 14px;
-  z-index: 2;
-}
-.result-content .format-picker {
   position: static;
   margin: 0 0 16px;
-  padding: 14px;
+  padding: 10px;
   border: 1px solid var(--line);
   border-radius: 14px;
   background: var(--bg-soft);
@@ -170,31 +161,26 @@ textarea::placeholder { color: color-mix(in srgb, var(--muted) 72%, transparent)
 .format-picker-header {
   font-size: 12px;
   font-weight: 800;
-  color: rgba(255,255,255,.86);
+  color: var(--text);
   margin-bottom: 10px;
   letter-spacing: 0;
-}
-.result-content .format-picker-header {
-  color: var(--text);
 }
 .format-picker-list {
   display: grid;
   gap: 8px;
-  max-height: min(52vh, 360px);
-  overflow: auto;
-  padding-right: 2px;
-}
-.result-content .format-picker-list {
   max-height: 270px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 0;
 }
 .format-btn {
   width: 100%;
   min-height: 54px;
   display: grid;
-  grid-template-columns: minmax(116px, 1.3fr) minmax(86px, .9fr) minmax(82px, .75fr) auto;
+  grid-template-columns: minmax(72px, .85fr) minmax(72px, 1fr) minmax(70px, .8fr) 64px;
   align-items: center;
-  gap: 12px;
-  padding: 10px 10px 10px 14px;
+  gap: 8px;
+  padding: 10px;
   border: 1px solid rgba(255,255,255,.18);
   border-radius: 8px;
   background: rgba(255,255,255,.94);
@@ -244,13 +230,17 @@ textarea::placeholder { color: color-mix(in srgb, var(--muted) 72%, transparent)
   font-size: 13px;
   font-weight: 750;
   white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .fmt-size {
   color: #3c3639;
   text-align: right;
 }
 .fmt-action {
-  min-width: 74px;
+  width: 64px;
+  min-width: 0;
   min-height: 38px;
   display: inline-flex;
   align-items: center;
@@ -261,6 +251,7 @@ textarea::placeholder { color: color-mix(in srgb, var(--muted) 72%, transparent)
   font-size: 14px;
   font-weight: 900;
   text-align: center;
+  white-space: nowrap;
 }
 .fmt-loading {
   grid-column: 1 / -1;

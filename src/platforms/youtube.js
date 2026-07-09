@@ -150,7 +150,7 @@ function formatSize(value) {
 function qualityLabel(height = 0, fallback = '') {
   const h = Number(height) || 0;
   if (!h && fallback) return String(fallback);
-  if (h >= 2160) return `${Math.round(h / 1000)}K`;
+  if (h >= 2160) return '2160p';
   if (h >= 1440) return '1440p';
   if (h >= 1080) return '1080p';
   if (h >= 720) return '720p';
@@ -168,12 +168,16 @@ function normalizeFormat(format = {}) {
   const height = Number(format.height) || 0;
   const hasAudio = hasAudioTrack(format);
   const hasVideo = hasVideoTrack(format);
+  const bitrate = Number(format.tbr || format.bitrate || format.abr || format.audioBitrate) || 0;
   return {
+    id: String(format.format_id || format.itag || ''),
     label: qualityLabel(height, format.qualityLabel || format.quality),
     height,
     url: format.url,
     hasAudio,
     hasVideo,
+    bitrate,
+    downloadFormat: String(format.format_id || format.itag || ''),
     size: formatSize(format.contentLength || format.filesize || format.filesize_approx),
     codec: [
       formatCodec(format.vcodec || codecFromMime(format.mimeType)),
@@ -189,20 +193,42 @@ function normalizeFormat(format = {}) {
 
 function collectFormats(formats = []) {
   const seen = new Set();
-  const result = [];
-  const sorted = formats.filter((format) => format?.url)
-    .sort((a, b) => (b.height || 0) - (a.height || 0));
+  const video = [];
+  const audio = [];
+  const sorted = formats.filter((format) => format?.url).sort((a, b) => {
+    const aHasVideo = hasVideoTrack(a);
+    const bHasVideo = hasVideoTrack(b);
+    if (aHasVideo !== bHasVideo) return aHasVideo ? -1 : 1;
+    return (b.height || 0) - (a.height || 0) ||
+      (Number(b.tbr || b.bitrate || b.abr || b.audioBitrate) || 0) -
+      (Number(a.tbr || a.bitrate || a.abr || a.audioBitrate) || 0);
+  });
 
   for (const format of sorted) {
     const item = normalizeFormat(format);
     const key = item.hasVideo
-      ? `${item.height}-${item.hasAudio ? 'av' : 'v'}`
-      : `audio-${item.codec || item.ext || result.length}`;
+      ? `video-${item.height}`
+      : `audio-${item.ext || ''}-${item.codec || ''}-${Math.round(item.bitrate)}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    result.push(item);
+    if (item.hasVideo && item.id) {
+      video.push({
+        ...item,
+        hasAudio: true,
+        merged: !item.hasAudio,
+        downloadFormat: item.hasAudio ? item.id : `${item.id}+bestaudio/best`
+      });
+    }
+    else if (item.hasAudio) audio.push({
+      ...item,
+      label: item.bitrate ? `${Math.round(item.bitrate)}k` : item.label,
+      downloadFormat: item.id || 'bestaudio'
+    });
   }
-  return result;
+  return [
+    ...video.sort((a, b) => b.height - a.height || b.bitrate - a.bitrate).slice(0, 3),
+    ...audio.sort((a, b) => b.bitrate - a.bitrate).slice(0, 2)
+  ];
 }
 
 function getCookieArgs() {

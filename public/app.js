@@ -263,9 +263,9 @@ function iconDownload() {
 }
 
 function formatKindLabel(fmt) {
-  if (fmt.hasVideo && fmt.hasAudio) return '影音';
-  if (fmt.hasVideo) return '僅影片';
-  if (fmt.hasAudio) return '僅音訊';
+  if (fmt.hasVideo && fmt.hasAudio) return '影片';
+  if (fmt.hasVideo) return '無聲影片';
+  if (fmt.hasAudio) return '音訊';
   return '媒體';
 }
 
@@ -370,17 +370,6 @@ function renderResult(data) {
       const label = document.createElement('span');
       label.textContent = fmt.label;
       btn.appendChild(label);
-      if (fmt.hasVideo) {
-        const meta = document.createElement('span');
-        meta.className = 'fmt-meta';
-        meta.textContent = fmt.hasAudio ? '影音' : '僅影片';
-        btn.appendChild(meta);
-      } else if (fmt.hasAudio) {
-        const meta = document.createElement('span');
-        meta.className = 'fmt-meta';
-        meta.textContent = '僅音訊';
-        btn.appendChild(meta);
-      }
       renderFormatButtonContent(btn, fmt);
       btn.addEventListener('click', async () => {
         formatList.querySelectorAll('.format-btn').forEach((b) => b.classList.remove('is-active'));
@@ -403,11 +392,17 @@ function renderResult(data) {
             showToast('重新解析失敗，請稍後再試');
             return;
           }
-          // Find matching format by height
+          // Re-match refreshed URLs; YouTube CDN links expire quickly.
           const freshFormats = payload.data.formats || [];
-          const matched = fmt.height
-            ? freshFormats.find(f => f.height === fmt.height)
-            : freshFormats[0];
+          const matched = freshFormats.find(f => fmt.id && f.id === fmt.id) ||
+            freshFormats.find(f =>
+              f.hasVideo === fmt.hasVideo &&
+              f.hasAudio === fmt.hasAudio &&
+              f.height === fmt.height &&
+              (f.label === fmt.label || f.bitrate === fmt.bitrate)
+            ) ||
+            freshFormats.find(f => f.hasVideo === fmt.hasVideo && f.hasAudio === fmt.hasAudio) ||
+            freshFormats[0];
           const targetUrl = matched?.url || payload.data.videoUrl;
           if (targetUrl) {
             window.open(targetUrl, '_blank', 'noopener,noreferrer');
@@ -435,20 +430,15 @@ function renderResult(data) {
     }
     formatPicker.classList.remove('is-hidden');
     // Update size value with format count
-    $('countValue').textContent = `${data.formats.length} 種畫質`;
+    const videoCount = data.formats.filter((fmt) => fmt.hasVideo && fmt.hasAudio).length;
+    const audioCount = data.formats.filter((fmt) => fmt.hasAudio && !fmt.hasVideo).length;
+    $('countValue').textContent = `${videoCount} 影片 / ${audioCount} 音訊`;
   }
 
   if (isVideo) {
-    // YouTube CDN URLs don't play in browser - show poster only
+    mediaPanel.querySelector('.yt-overlay-msg')?.remove();
     if (data.platform === 'youtube') {
-      videoPlayer.removeAttribute('src');
-      videoPlayer.load();
-      // Show a message overlay on the video element
-      const msg = document.createElement('div');
-      msg.className = 'yt-overlay-msg';
-      msg.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7L8 5Z"/></svg> 點下方按鈕下載影片';
-      mediaPanel.querySelector('.yt-overlay-msg')?.remove();
-      mediaPanel.appendChild(msg);
+      videoPlayer.src = data.video.directUrl || data.video.previewUrl;
     } else {
       videoPlayer.src = data.video.previewUrl || data.video.directUrl;
     }
