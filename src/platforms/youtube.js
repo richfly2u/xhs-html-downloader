@@ -66,8 +66,12 @@ export function extractVideoId(url) {
     if (host === 'youtu.be') return parsed.pathname.slice(1).split('/')[0] || null;
     const shortsMatch = parsed.pathname.match(/\/shorts\/([a-zA-Z0-9_-]{11})/);
     if (shortsMatch) return shortsMatch[1];
+    const liveMatch = parsed.pathname.match(/\/live\/([a-zA-Z0-9_-]{11})/);
+    if (liveMatch) return liveMatch[1];
     const embedMatch = parsed.pathname.match(/\/embed\/([a-zA-Z0-9_-]{11})/);
     if (embedMatch) return embedMatch[1];
+    const legacyMatch = parsed.pathname.match(/\/v\/([a-zA-Z0-9_-]{11})/);
+    if (legacyMatch) return legacyMatch[1];
     return parsed.searchParams.get('v') || null;
   } catch {
     return null;
@@ -353,6 +357,7 @@ export async function resolveShare(inputText, options) {
     parser: 'page-media-scan',
     platform: 'youtube'
   };
+  const failures = [];
 
   if (YTDLP_AVAILABLE) {
     try {
@@ -360,7 +365,9 @@ export async function resolveShare(inputText, options) {
       applyYtDlpInfo(result, info);
       if (result.videoUrl && result.formats.length) return result;
     } catch (error) {
-      console.error('[youtube] yt-dlp failed:', error.message);
+      const message = error.message || 'unknown yt-dlp error';
+      failures.push(`yt-dlp: ${message}`);
+      console.error('[youtube] yt-dlp failed:', message);
     }
   }
 
@@ -381,7 +388,9 @@ export async function resolveShare(inputText, options) {
     result.parser = 'innertube-api';
     if (result.videoUrl) return result;
   } catch (error) {
-    console.error('[youtube] InnerTube failed:', error.message?.slice(0, 100));
+    const message = error.message?.slice(0, 180) || 'unknown InnerTube error';
+    failures.push(`InnerTube: ${message}`);
+    console.error('[youtube] InnerTube failed:', message);
   }
 
   try {
@@ -397,7 +406,9 @@ export async function resolveShare(inputText, options) {
     });
     if (result.videoUrl) return result;
   } catch (error) {
-    console.error('[youtube] page scan failed:', error.message);
+    const message = error.message || 'unknown page scan error';
+    failures.push(`page scan: ${message}`);
+    console.error('[youtube] page scan failed:', message);
   }
 
   if (!result.videoUrl) {
@@ -423,12 +434,18 @@ export async function resolveShare(inputText, options) {
         result.parser = 'ytdl-core';
       }
     } catch (error) {
-      console.error('[youtube] ytdl-core failed:', error.message?.slice(0, 100));
+      const message = error.message?.slice(0, 180) || 'unknown ytdl-core error';
+      failures.push(`ytdl-core: ${message}`);
+      console.error('[youtube] ytdl-core failed:', message);
     }
   }
 
-  if (!result.videoUrl && !result.formats.length) {
-    const error = new Error('無法取得這支 YouTube 影片的下載格式，請確認連結是公開影片，或稍後重新解析。');
+  if (!result.videoUrl || !result.formats.length) {
+    const detail = failures.find((item) => /Sign in|login|Private|Video unavailable|members-only|age/i.test(item)) ||
+      failures[0] ||
+      '';
+    const suffix = detail ? `（${detail.slice(0, 220)}）` : '';
+    const error = new Error(`無法取得這支 YouTube 影片的下載格式，請確認連結是公開影片，或稍後重新解析。${suffix}`);
     error.code = 'MEDIA_NOT_FOUND';
     throw error;
   }
