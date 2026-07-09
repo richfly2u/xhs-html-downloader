@@ -89,7 +89,7 @@ function mediaProxyUrl(req, directUrl, { download = false, filename = 'media' } 
   const query = new URLSearchParams({ url: directUrl });
   if (download) query.set('download', '1');
   if (filename) query.set('name', filename);
-  return `${req.protocol}://${req.get('host')}/api/media?${query.toString()}`;
+  return `/api/media?${query.toString()}`;
 }
 
 function ytdlpCookieArgs() {
@@ -103,12 +103,13 @@ function isSafeYtdlpFormat(value) {
   return /^[a-zA-Z0-9_+.,:[\]\-<=/]+$/.test(value);
 }
 
-function youtubeDownloadUrl(req, sourceUrl, format, { filename = 'youtube.mp4' } = {}) {
+function youtubeDownloadUrl(req, sourceUrl, format, { filename = 'youtube.mp4', preview = false } = {}) {
   const query = new URLSearchParams({
     url: sourceUrl,
     format,
     name: filename
   });
+  if (preview) query.set('preview', '1');
   return `/api/youtube-download?${query.toString()}`;
 }
 
@@ -142,11 +143,18 @@ app.post('/api/parse', parseLimiter, async (req, res) => {
     }
 
     const baseName = safeFilename(data.title || data.noteId || 'xiaohongshu');
+    const youtubePreviewFormat = data.platform === 'youtube'
+      ? (data.formats || []).find((item) => item.hasVideo && item.hasAudio)?.downloadFormat || 'best[ext=mp4]/best'
+      : null;
     const video = data.videoUrl ? {
       kind: 'video',
       directUrl: data.videoUrl,
-      previewUrl: mediaProxyUrl(req, data.videoUrl) || data.videoUrl,
-      downloadUrl: mediaProxyUrl(req, data.videoUrl, { download: true, filename: `${baseName}.mp4` }) || data.videoUrl,
+      previewUrl: data.platform === 'youtube'
+        ? youtubeDownloadUrl(req, data.sourceUrl, youtubePreviewFormat, { filename: `${baseName}-preview.mp4`, preview: true })
+        : (mediaProxyUrl(req, data.videoUrl) || data.videoUrl),
+      downloadUrl: data.platform === 'youtube'
+        ? youtubeDownloadUrl(req, data.sourceUrl, 'bestvideo+bestaudio/best', { filename: `${baseName}.mp4` })
+        : (mediaProxyUrl(req, data.videoUrl, { download: true, filename: `${baseName}.mp4` }) || data.videoUrl),
       bytes: probe.bytes,
       size: formatBytes(probe.bytes),
       contentType: probe.contentType || 'video/mp4'
@@ -161,8 +169,8 @@ app.post('/api/parse', parseLimiter, async (req, res) => {
     } : (data.type === 'video' && data.platform === 'youtube' ? {
       kind: 'video',
       directUrl: data.videoUrl,
-      previewUrl: data.cover || data.sourceUrl,
-      downloadUrl: data.videoUrl,
+      previewUrl: youtubeDownloadUrl(req, data.sourceUrl, youtubePreviewFormat, { filename: `${baseName}-preview.mp4`, preview: true }),
+      downloadUrl: youtubeDownloadUrl(req, data.sourceUrl, 'bestvideo+bestaudio/best', { filename: `${baseName}.mp4` }),
       bytes: null,
       size: null,
       contentType: null
@@ -225,6 +233,7 @@ app.get('/api/youtube-download', mediaLimiter, async (req, res) => {
     }
 
     const requestedName = safeFilename(String(req.query.name || 'youtube.mp4'), 'youtube.mp4');
+    const isPreview = String(req.query.preview || '') === '1';
     const extension = requestedName.includes('.') ? requestedName.split('.').pop() : 'mp4';
     tempDir = await mkdtemp(path.join(tmpdir(), 'xhs-youtube-'));
     const outputTemplate = path.join(tempDir, 'media.%(ext)s');
@@ -262,7 +271,8 @@ app.get('/api/youtube-download', mediaLimiter, async (req, res) => {
     const filePath = path.join(tempDir, file);
     const info = await stat(filePath);
     const finalName = requestedName.includes('.') ? requestedName : `${requestedName}.${extension}`;
-    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(finalName)}`);
+    const disposition = isPreview ? 'inline' : 'attachment';
+    res.setHeader('Content-Disposition', `${disposition}; filename*=UTF-8''${encodeURIComponent(finalName)}`);
     const outputExt = file.includes('.') ? file.split('.').pop().toLowerCase() : extension;
     const contentType = outputExt === 'm4a' ? 'audio/mp4' :
       outputExt === 'webm' ? 'audio/webm' :

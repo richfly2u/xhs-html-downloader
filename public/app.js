@@ -438,7 +438,7 @@ function renderResult(data) {
   if (isVideo) {
     mediaPanel.querySelector('.yt-overlay-msg')?.remove();
     if (data.platform === 'youtube') {
-      videoPlayer.src = data.video.directUrl || data.video.previewUrl;
+      videoPlayer.src = data.video.previewUrl || data.video.directUrl;
     } else {
       videoPlayer.src = data.video.previewUrl || data.video.directUrl;
     }
