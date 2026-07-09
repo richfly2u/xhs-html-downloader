@@ -25,6 +25,7 @@ const YTDLP_STRATEGIES = [
   ['--extractor-args', 'youtube:player_client=ios'],
   ['--extractor-args', 'youtube:player_client=web']
 ];
+const DEFAULT_YOUTUBE_COOKIES_PATH = path.resolve(__dirname, '../../.secrets/youtube-cookies.txt');
 
 export const name = 'youtube';
 
@@ -204,13 +205,21 @@ function collectFormats(formats = []) {
   return result;
 }
 
+function getCookieArgs() {
+  const cookiePath = process.env.YTDLP_COOKIES_PATH ||
+    process.env.YOUTUBE_COOKIES_PATH ||
+    DEFAULT_YOUTUBE_COOKIES_PATH;
+  return cookiePath && existsSync(cookiePath) ? ['--cookies', cookiePath] : [];
+}
+
 async function ytDlpWithFallback(url) {
   const errors = [];
   const common = [
     url,
     '-j',
     '--no-playlist',
-    '--no-warnings'
+    '--no-warnings',
+    ...getCookieArgs()
   ];
 
   for (const extra of YTDLP_STRATEGIES) {
