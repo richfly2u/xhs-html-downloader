@@ -10,7 +10,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="stylesheet" href="/styles.css">
   <script src="https://cdn.jsdelivr.net/npm/page-agent@1.10.0/dist/iife/page-agent.demo.js" crossorigin="true"></script>
-  <script src="/app.js?v=20260709-2215" defer></script>
+  <script src="/app.js?v=20260709-2225" defer></script>
 </head>
 <body>
   <div class="ambient ambient-one"></div>
@@ -91,10 +91,6 @@
           <div class="media-placeholder" id="mediaPlaceholder">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4V5Zm3 10 3-3 3 3 2-2 3 3M9 9h.01"/></svg>
           </div>
-          <div class="format-picker is-hidden" id="formatPicker">
-            <div class="format-picker-header">點選畫質直接下載（連結有時效性，失效請重新解析）</div>
-            <div class="format-picker-list" id="formatList"></div>
-          </div>
         </div>
 
         <div class="result-content">
@@ -112,6 +108,11 @@
             <div><dt>大小</dt><dd id="sizeValue">—</dd></div>
             <div><dt>項目</dt><dd id="countValue">—</dd></div>
           </dl>
+
+          <div class="format-picker is-hidden" id="formatPicker">
+            <div class="format-picker-header">選擇 YouTube 畫質下載</div>
+            <div class="format-picker-list" id="formatList"></div>
+          </div>
 
           <div class="result-actions">
             <div class="result-actions-primary">

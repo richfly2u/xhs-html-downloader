@@ -206,16 +206,14 @@ async function ytDlpWithFallback(url) {
     url,
     '-j',
     '--no-playlist',
-    '--no-warnings',
-    '-f',
-    'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
+    '--no-warnings'
   ];
 
   for (const extra of YTDLP_STRATEGIES) {
     try {
       return await new Promise((resolve, reject) => {
         execFile(YTDLP_BIN, [...common, ...extra], {
-          timeout: 35_000,
+          timeout: 45_000,
           maxBuffer: 50 * 1024 * 1024
         }, (error, stdout, stderr) => {
           if (error) {
@@ -360,7 +358,7 @@ export async function resolveShare(inputText, options) {
     try {
       const info = await ytDlpWithFallback(input.toString());
       applyYtDlpInfo(result, info);
-      if (result.videoUrl) return result;
+      if (result.videoUrl && result.formats.length) return result;
     } catch (error) {
       console.error('[youtube] yt-dlp failed:', error.message);
     }
@@ -427,6 +425,12 @@ export async function resolveShare(inputText, options) {
     } catch (error) {
       console.error('[youtube] ytdl-core failed:', error.message?.slice(0, 100));
     }
+  }
+
+  if (!result.videoUrl && !result.formats.length) {
+    const error = new Error('無法取得這支 YouTube 影片的下載格式，請確認連結是公開影片，或稍後重新解析。');
+    error.code = 'MEDIA_NOT_FOUND';
+    throw error;
   }
 
   return result;

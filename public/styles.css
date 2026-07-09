@@ -159,6 +159,14 @@ textarea::placeholder { color: color-mix(in srgb, var(--muted) 72%, transparent)
   padding: 44px 14px 14px;
   z-index: 2;
 }
+.result-content .format-picker {
+  position: static;
+  margin: 0 0 16px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--bg-soft);
+}
 .format-picker-header {
   font-size: 12px;
   font-weight: 800;
@@ -166,12 +174,18 @@ textarea::placeholder { color: color-mix(in srgb, var(--muted) 72%, transparent)
   margin-bottom: 10px;
   letter-spacing: 0;
 }
+.result-content .format-picker-header {
+  color: var(--text);
+}
 .format-picker-list {
   display: grid;
   gap: 8px;
   max-height: min(52vh, 360px);
   overflow: auto;
   padding-right: 2px;
+}
+.result-content .format-picker-list {
+  max-height: 270px;
 }
 .format-btn {
   width: 100%;
