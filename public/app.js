@@ -405,7 +405,13 @@ function renderResult(data) {
             freshFormats[0];
           const targetUrl = matched?.url || payload.data.videoUrl;
           if (targetUrl) {
-            window.open(targetUrl, '_blank', 'noopener,noreferrer');
+            const link = document.createElement('a');
+            link.href = targetUrl;
+            link.setAttribute('download', '');
+            link.style.display = 'none';
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
           } else {
             showToast('此畫質暫無可用連結，請嘗試其他畫質');
           }
