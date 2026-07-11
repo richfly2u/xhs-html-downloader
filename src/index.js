@@ -11,6 +11,7 @@ import { rateLimit } from 'express-rate-limit';
 import { probeMedia, resolvePublicShare } from './resolver.js';
 import { analyzeCopy } from './analyzer.js';
 import { fetchThumbnail } from './thumbnail.js';
+import { detectPlatform, resolveForPlatform } from './platforms/index.js';
 import {
   assertHttpUrl,
   assertPublicResolution,
@@ -95,24 +96,28 @@ function mediaProxyUrl(req, directUrl, { download = false, filename = 'media' } 
   return `${req.protocol}://${req.get('host')}/api/media?${query.toString()}`;
 }
 
-app.get('/health', (_req, res) => {
+function healthHandler(_req, res) {
   const aiProvider = process.env.GROQ_API_KEY ? 'groq' : (process.env.OPENAI_API_KEY ? 'openai' : null);
   res.json({ ok: true, service: 'xhs-html-downloader', version: '0.4.5', mediaProxyEnabled, aiConfigured: Boolean(aiProvider), aiProvider, aiAccessProtected: aiAccessProtected() });
-});
+}
+
+app.get('/health', healthHandler);
+app.get('/api/health', healthHandler);
 
 app.post('/api/parse', parseLimiter, async (req, res) => {
   try {
     const input = req.body?.url || req.body?.text;
     if (typeof input !== 'string' || input.trim().length === 0) {
-      return res.status(400).json({ success: false, error: '請提供小紅書分享文字或連結' });
+      return res.status(400).json({ success: false, error: '請提供支援平台的分享文字或連結' });
     }
     if (input.length > 4096) {
       return res.status(400).json({ success: false, error: '輸入內容過長' });
     }
 
-    const data = await resolvePublicShare(input, {
+    const data = await resolveForPlatform(input, {
       timeoutMs: requestTimeoutMs,
-      maxHtmlBytes
+      maxHtmlBytes,
+      youtubeProxyUrl: process.env.YOUTUBE_PROXY_URL || process.env.YT_DLP_API_URL
     });
 
     let probe = { bytes: null, contentType: null };
@@ -163,6 +168,25 @@ app.post('/api/parse', parseLimiter, async (req, res) => {
   }
 });
 
+app.post('/api/youtube', parseLimiter, async (req, res) => {
+  try {
+    const input = req.body?.url || req.body?.text;
+    if (typeof input !== 'string' || !input.trim()) {
+      return res.status(400).json({ success: false, error: '請提供 YouTube 連結' });
+    }
+    if (detectPlatform(input)?.id !== 'youtube') {
+      return res.status(400).json({ success: false, error: '不支援此連結，請提供 YouTube 公開連結' });
+    }
+    const data = await resolveForPlatform(input, {
+      timeoutMs: requestTimeoutMs,
+      maxHtmlBytes,
+      youtubeProxyUrl: process.env.YOUTUBE_PROXY_URL || process.env.YT_DLP_API_URL
+    });
+    return res.json({ success: true, data: { ...data, parsedAt: new Date().toISOString() } });
+  } catch (error) {
+    return res.status(400).json({ success: false, error: error?.message || 'YouTube 解析失敗' });
+  }
+});
 
 app.get('/api/thumbnail', mediaLimiter, async (req, res) => {
   try {
