@@ -1,8 +1,10 @@
 import 'dotenv/config';
-import { createHash, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Readable } from 'node:stream';
+import { createReadStream, existsSync } from 'node:fs';
+import { mkdtemp, readdir, rm, stat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import cors from 'cors';
 import express from 'express';
@@ -11,14 +13,18 @@ import { rateLimit } from 'express-rate-limit';
 import { probeMedia, resolvePublicShare } from './resolver.js';
 import { analyzeCopy } from './analyzer.js';
 import { fetchThumbnail } from './thumbnail.js';
-import { detectPlatform, resolveForPlatform } from './platforms/index.js';
+import { extractVideoId } from './platforms/youtube.js';
+import { execFile, spawn } from 'node:child_process';
 import {
   assertHttpUrl,
   assertPublicResolution,
+  codesEqual,
   formatBytes,
-  isMediaHost,
-  safeFilename
+  getProvidedCode,
+  safeFilename,
+  secureDigest
 } from './utils.js';
+import { isMediaHost } from './platforms/index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(__dirname, '../public');
@@ -31,7 +37,12 @@ const maxMediaBytes = Number(process.env.MAX_MEDIA_BYTES || 300 * 1024 * 1024);
 const mediaProxyDefault = process.env.VERCEL ? 'false' : 'true';
 const mediaProxyEnabled = String(process.env.ENABLE_MEDIA_PROXY ?? mediaProxyDefault).toLowerCase() === 'true';
 
-if (process.env.VERCEL || String(process.env.TRUST_PROXY || 'false').toLowerCase() === 'true') {
+// yt-dlp 二進位路徑（供 /api/media 代理 YouTube 串流用）
+const __ytdlpBin = path.resolve(__dirname, '../node_modules/.bin/yt-dlp' + (process.platform === 'win32' ? '.exe' : ''));
+const YTDLP_BIN = existsSync(__ytdlpBin) ? __ytdlpBin : 'yt-dlp';
+const DEFAULT_YOUTUBE_COOKIES_PATH = path.resolve(__dirname, '../.secrets/youtube-cookies.txt');
+
+if (process.env.VERCEL || process.env.RAILWAY_ENVIRONMENT || String(process.env.TRUST_PROXY || 'false').toLowerCase() === 'true') {
   app.set('trust proxy', 1);
 }
 
@@ -69,23 +80,8 @@ const mediaLimiter = rateLimit({
   message: { success: false, error: '下載請求太頻繁，請稍後再試' }
 });
 
-function secureDigest(value) {
-  return createHash('sha256').update(String(value || ''), 'utf8').digest();
-}
-
-function codesEqual(left, right) {
-  return timingSafeEqual(secureDigest(left), secureDigest(right));
-}
-
 function aiAccessProtected() {
   return Boolean(String(process.env.AI_ACCESS_CODE || '').trim());
-}
-
-function getProvidedCode(req) {
-  const headerCode = req.get('x-ai-access-code');
-  if (typeof headerCode === 'string' && headerCode.trim()) return headerCode.trim();
-  if (typeof req.body?.accessCode === 'string' && req.body.accessCode.trim()) return req.body.accessCode.trim();
-  return '';
 }
 
 function mediaProxyUrl(req, directUrl, { download = false, filename = 'media' } = {}) {
@@ -93,12 +89,58 @@ function mediaProxyUrl(req, directUrl, { download = false, filename = 'media' } 
   const query = new URLSearchParams({ url: directUrl });
   if (download) query.set('download', '1');
   if (filename) query.set('name', filename);
-  return `${req.protocol}://${req.get('host')}/api/media?${query.toString()}`;
+  return `/api/media?${query.toString()}`;
+}
+
+function ytdlpCookieArgs() {
+  const cookiePath = process.env.YTDLP_COOKIES_PATH ||
+    process.env.YOUTUBE_COOKIES_PATH ||
+    DEFAULT_YOUTUBE_COOKIES_PATH;
+  return cookiePath && existsSync(cookiePath) ? ['--cookies', cookiePath] : [];
+}
+
+function isSafeYtdlpFormat(value) {
+  return /^[a-zA-Z0-9_+.,:[\]\-<=/]+$/.test(value);
+}
+
+function youtubeDownloadUrl(req, sourceUrl, format, { filename = 'youtube.mp4', preview = false } = {}) {
+  const query = new URLSearchParams({
+    url: sourceUrl,
+    format,
+    name: filename
+  });
+  if (preview) query.set('preview', '1');
+  return `/api/youtube-download?${query.toString()}`;
+}
+
+function inferMediaType(url, contentType = '') {
+  const normalized = String(contentType || '').toLowerCase();
+  if (/^video\/mp4(?:;|$)/i.test(normalized)) return 'video/mp4';
+  if (/^image\/jpeg(?:;|$)|^image\/jpg(?:;|$)/i.test(normalized)) return 'image/jpeg';
+  if (/^image\/png(?:;|$)/i.test(normalized)) return 'image/png';
+  if (/^image\/webp(?:;|$)/i.test(normalized)) return 'image/webp';
+  if (/^image\/avif(?:;|$)/i.test(normalized)) return 'image/avif';
+
+  const value = String(url || '').toLowerCase();
+  if (/\.mp4(?:$|\?)/i.test(value)) return 'video/mp4';
+  if (/\.png(?:$|\?)/i.test(value)) return 'image/png';
+  if (/\.webp(?:$|\?)/i.test(value)) return 'image/webp';
+  if (/\.avif(?:$|\?)/i.test(value)) return 'image/avif';
+  if (/\.jpe?g(?:$|\?)/i.test(value)) return 'image/jpeg';
+  return null;
+}
+
+function pickYoutubePreviewFormat(formats = []) {
+  const playable = formats.filter((item) => item?.hasVideo && item?.hasAudio && item?.downloadFormat);
+  return playable.find((item) => item.height && item.height <= 720) ||
+    playable.find((item) => item.height && item.height <= 1080) ||
+    playable[0] ||
+    null;
 }
 
 function healthHandler(_req, res) {
   const aiProvider = process.env.GROQ_API_KEY ? 'groq' : (process.env.OPENAI_API_KEY ? 'openai' : null);
-  res.json({ ok: true, service: 'xhs-html-downloader', version: '0.4.5', mediaProxyEnabled, aiConfigured: Boolean(aiProvider), aiProvider, aiAccessProtected: aiAccessProtected() });
+  res.json({ ok: true, service: 'xhs-html-downloader', version: '0.4.6', mediaProxyEnabled, aiConfigured: Boolean(aiProvider), aiProvider, aiAccessProtected: aiAccessProtected() });
 }
 
 app.get('/health', healthHandler);
@@ -108,16 +150,15 @@ app.post('/api/parse', parseLimiter, async (req, res) => {
   try {
     const input = req.body?.url || req.body?.text;
     if (typeof input !== 'string' || input.trim().length === 0) {
-      return res.status(400).json({ success: false, error: '請提供支援平台的分享文字或連結' });
+      return res.status(400).json({ success: false, error: '請提供小紅書分享文字或連結' });
     }
     if (input.length > 4096) {
       return res.status(400).json({ success: false, error: '輸入內容過長' });
     }
 
-    const data = await resolveForPlatform(input, {
+    const data = await resolvePublicShare(input, {
       timeoutMs: requestTimeoutMs,
-      maxHtmlBytes,
-      youtubeProxyUrl: process.env.YOUTUBE_PROXY_URL || process.env.YT_DLP_API_URL
+      maxHtmlBytes
     });
 
     let probe = { bytes: null, contentType: null };
@@ -130,15 +171,42 @@ app.post('/api/parse', parseLimiter, async (req, res) => {
     }
 
     const baseName = safeFilename(data.title || data.noteId || 'xiaohongshu');
+    const youtubePreview = data.platform === 'youtube' ? pickYoutubePreviewFormat(data.formats || []) : null;
+    const youtubePreviewUrl = data.previewVideoUrl || youtubePreview?.url || data.videoUrl;
+    const hasYoutubeFormats = data.platform === 'youtube' && Array.isArray(data.formats) && data.formats.length > 0;
     const video = data.videoUrl ? {
       kind: 'video',
       directUrl: data.videoUrl,
-      previewUrl: mediaProxyUrl(req, data.videoUrl) || data.videoUrl,
-      downloadUrl: mediaProxyUrl(req, data.videoUrl, { download: true, filename: `${baseName}.mp4` }) || data.videoUrl,
+      previewUrl: data.platform === 'youtube'
+        ? (mediaProxyUrl(req, youtubePreviewUrl) || youtubePreviewUrl)
+        : (mediaProxyUrl(req, data.videoUrl) || data.videoUrl),
+      downloadUrl: data.platform === 'youtube'
+        ? (hasYoutubeFormats
+            ? youtubeDownloadUrl(req, data.sourceUrl, 'bestvideo+bestaudio/best', { filename: `${baseName}.mp4` })
+            : (mediaProxyUrl(req, data.videoUrl, { download: true, filename: `${baseName}.mp4` }) || data.videoUrl))
+        : (mediaProxyUrl(req, data.videoUrl, { download: true, filename: `${baseName}.mp4` }) || data.videoUrl),
       bytes: probe.bytes,
       size: formatBytes(probe.bytes),
       contentType: probe.contentType || 'video/mp4'
-    } : null;
+    } : (data.type === 'video' && data.platform !== 'youtube' ? {
+      kind: 'video',
+      directUrl: data.sourceUrl,
+      previewUrl: data.sourceUrl,
+      downloadUrl: data.sourceUrl,
+      bytes: null,
+      size: null,
+      contentType: null
+    } : (data.type === 'video' && data.platform === 'youtube' ? {
+      kind: 'video',
+      directUrl: data.videoUrl,
+      previewUrl: mediaProxyUrl(req, youtubePreviewUrl) || youtubePreviewUrl,
+      downloadUrl: hasYoutubeFormats
+        ? youtubeDownloadUrl(req, data.sourceUrl, 'bestvideo+bestaudio/best', { filename: `${baseName}.mp4` })
+        : (mediaProxyUrl(req, data.videoUrl, { download: true, filename: `${baseName}.mp4` }) || data.videoUrl),
+      bytes: null,
+      size: null,
+      contentType: null
+    } : null));
 
     const images = data.images.map((url, index) => ({
       kind: 'image',
@@ -147,6 +215,18 @@ app.post('/api/parse', parseLimiter, async (req, res) => {
       previewUrl: mediaProxyUrl(req, url) || url,
       downloadUrl: mediaProxyUrl(req, url, { download: true, filename: `${baseName}-${index + 1}.jpg` }) || url
     }));
+    const formats = data.platform === 'youtube'
+      ? (data.formats || []).map((item) => {
+          const ext = item.hasVideo ? 'mp4' : (item.ext || 'm4a');
+          const filename = `${baseName}-${item.label || item.id || 'format'}.${ext}`;
+          return {
+            ...item,
+            url: item.downloadFormat
+              ? youtubeDownloadUrl(req, data.sourceUrl, item.downloadFormat, { filename })
+              : item.url
+          };
+        })
+      : data.formats;
 
     return res.json({
       success: true,
@@ -154,6 +234,7 @@ app.post('/api/parse', parseLimiter, async (req, res) => {
         ...data,
         video,
         images,
+        formats,
         format: video ? 'MP4' : (images.length ? '圖片' : null),
         bytes: probe.bytes,
         size: formatBytes(probe.bytes),
@@ -168,25 +249,83 @@ app.post('/api/parse', parseLimiter, async (req, res) => {
   }
 });
 
-app.post('/api/youtube', parseLimiter, async (req, res) => {
+app.get('/api/youtube-download', mediaLimiter, async (req, res) => {
+  let tempDir = null;
   try {
-    const input = req.body?.url || req.body?.text;
-    if (typeof input !== 'string' || !input.trim()) {
-      return res.status(400).json({ success: false, error: '請提供 YouTube 連結' });
+    const rawUrl = String(req.query.url || '');
+    const sourceUrl = assertHttpUrl(rawUrl);
+    if (!extractVideoId(sourceUrl.toString())) {
+      return res.status(400).json({ success: false, error: '不是有效的 YouTube 影片連結' });
     }
-    if (detectPlatform(input)?.id !== 'youtube') {
-      return res.status(400).json({ success: false, error: '不支援此連結，請提供 YouTube 公開連結' });
+    await assertPublicResolution(sourceUrl.hostname);
+
+    const format = String(req.query.format || 'bestvideo+bestaudio/best');
+    if (!isSafeYtdlpFormat(format)) {
+      return res.status(400).json({ success: false, error: '不支援的下載格式' });
     }
-    const data = await resolveForPlatform(input, {
-      timeoutMs: requestTimeoutMs,
-      maxHtmlBytes,
-      youtubeProxyUrl: process.env.YOUTUBE_PROXY_URL || process.env.YT_DLP_API_URL
+
+    const requestedName = safeFilename(String(req.query.name || 'youtube.mp4'), 'youtube.mp4');
+    const isPreview = String(req.query.preview || '') === '1';
+    const extension = requestedName.includes('.') ? requestedName.split('.').pop() : 'mp4';
+    tempDir = await mkdtemp(path.join(tmpdir(), 'xhs-youtube-'));
+    const outputTemplate = path.join(tempDir, 'media.%(ext)s');
+    const args = [
+      sourceUrl.toString(),
+      '-f', format,
+      '--no-playlist',
+      '--no-warnings',
+      '-o', outputTemplate,
+      ...ytdlpCookieArgs()
+    ];
+    if (extension === 'mp4') args.splice(5, 0, '--merge-output-format', 'mp4');
+
+    const child = spawn(YTDLP_BIN, args, { windowsHide: true });
+    let stderr = '';
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+      if (stderr.length > 1200) stderr = stderr.slice(-1200);
     });
-    return res.json({ success: true, data: { ...data, parsedAt: new Date().toISOString() } });
+
+    const timeoutTimer = setTimeout(() => child.kill(), mediaTimeoutMs);
+    const code = await new Promise((resolve, reject) => {
+      child.on('error', reject);
+      child.on('close', resolve);
+    });
+    clearTimeout(timeoutTimer);
+    if (code !== 0) {
+      throw new Error(stderr.trim() || `yt-dlp 退出碼 ${code}`);
+    }
+
+    const files = await readdir(tempDir);
+    const file = files.find((name) => !name.endsWith('.part'));
+    if (!file) throw new Error('下載完成但找不到輸出檔');
+
+    const filePath = path.join(tempDir, file);
+    const info = await stat(filePath);
+    const finalName = requestedName.includes('.') ? requestedName : `${requestedName}.${extension}`;
+    const disposition = isPreview ? 'inline' : 'attachment';
+    res.setHeader('Content-Disposition', `${disposition}; filename*=UTF-8''${encodeURIComponent(finalName)}`);
+    const outputExt = file.includes('.') ? file.split('.').pop().toLowerCase() : extension;
+    const contentType = outputExt === 'm4a' ? 'audio/mp4' :
+      outputExt === 'webm' ? 'audio/webm' :
+      outputExt === 'mp3' ? 'audio/mpeg' :
+      'video/mp4';
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Length', String(info.size));
+    res.setHeader('Cache-Control', 'no-store');
+    await pipeline(createReadStream(filePath), res);
   } catch (error) {
-    return res.status(400).json({ success: false, error: error?.message || 'YouTube 解析失敗' });
+    if (!res.headersSent) {
+      const message = error instanceof Error ? error.message : 'YouTube 下載失敗';
+      res.status(502).json({ success: false, error: message });
+    }
+  } finally {
+    if (tempDir) {
+      rm(tempDir, { recursive: true, force: true }).catch(() => {});
+    }
   }
 });
+
 
 app.get('/api/thumbnail', mediaLimiter, async (req, res) => {
   try {
@@ -241,14 +380,21 @@ app.get('/api/media', mediaLimiter, async (req, res) => {
     const rawUrl = String(req.query.url || '');
     const url = assertHttpUrl(rawUrl);
     if (!isMediaHost(url.hostname)) {
-      return res.status(400).json({ success: false, error: '只允許代理小紅書 CDN 媒體' });
+      return res.status(400).json({ success: false, error: '只允許代理 CDN 媒體' });
     }
     await assertPublicResolution(url.hostname);
 
+    const requestedName = safeFilename(String(req.query.name || 'media'), 'media');
+    const disposition = String(req.query.download || '') === '1' ? 'attachment' : 'inline';
+    const extension = requestedName.includes('.') ? requestedName.split('.').pop() : 'mp4';
+
+    // 一般 CDN 代理（XHS、YouTube 預覽等）
     const headers = {
       'user-agent': req.get('user-agent') || 'Mozilla/5.0',
       accept: 'video/mp4,image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
-      referer: 'https://www.xiaohongshu.com/'
+      referer: url.hostname.endsWith('.googlevideo.com')
+        ? 'https://www.youtube.com/'
+        : 'https://www.xiaohongshu.com/'
     };
     if (req.headers.range) headers.range = req.headers.range;
 
@@ -261,10 +407,24 @@ app.get('/api/media', mediaLimiter, async (req, res) => {
       return res.status(502).json({ success: false, error: `上游媒體回應錯誤：HTTP ${upstream.status}` });
     }
 
-    const contentType = upstream.headers.get('content-type') || '';
-    if (!/^video\/mp4(?:;|$)|^image\/(?:jpeg|png|webp|avif)(?:;|$)/i.test(contentType)) {
+    if (upstream.url) {
+      try {
+        const effectiveHost = new URL(upstream.url).hostname;
+        if (!isMediaHost(effectiveHost)) {
+          await upstream.body.cancel();
+          return res.status(400).json({ success: false, error: '重新導向到非 CDN 位址，已拒絕' });
+        }
+      } catch {
+        await upstream.body.cancel();
+        return res.status(400).json({ success: false, error: '重新導向到無效網址' });
+      }
+    }
+
+    const rawContentType = upstream.headers.get('content-type') || '';
+    const inferredContentType = inferMediaType(upstream.url || url.toString(), rawContentType);
+    if (!inferredContentType) {
       await upstream.body.cancel();
-      return res.status(415).json({ success: false, error: `不支援的媒體格式：${contentType || '未知'}` });
+      return res.status(415).json({ success: false, error: `不支援的媒體格式：${rawContentType || '未知'}` });
     }
 
     const length = Number(upstream.headers.get('content-length')) || null;
@@ -278,18 +438,28 @@ app.get('/api/media', mediaLimiter, async (req, res) => {
       const value = upstream.headers.get(header);
       if (value) res.setHeader(header, value);
     }
+    res.setHeader('content-type', inferredContentType);
 
-    const extension = contentType.startsWith('video/') ? 'mp4' :
-      contentType.includes('png') ? 'png' :
-      contentType.includes('webp') ? 'webp' :
-      contentType.includes('avif') ? 'avif' : 'jpg';
-    const requestedName = safeFilename(String(req.query.name || `media.${extension}`), `media.${extension}`);
-    const finalName = requestedName.includes('.') ? requestedName : `${requestedName}.${extension}`;
-    const disposition = String(req.query.download || '') === '1' ? 'attachment' : 'inline';
-    res.setHeader('Content-Disposition', `${disposition}; filename*=UTF-8''${encodeURIComponent(finalName)}`);
+    const ext = inferredContentType.startsWith('video/') ? 'mp4' :
+      inferredContentType.includes('png') ? 'png' :
+      inferredContentType.includes('webp') ? 'webp' :
+      inferredContentType.includes('avif') ? 'avif' : 'jpg';
+    const fn = requestedName.includes('.') ? requestedName : `${requestedName}.${ext}`;
+    res.setHeader('Content-Disposition', `${disposition}; filename*=UTF-8''${encodeURIComponent(fn)}`);
     res.setHeader('Cache-Control', 'public, max-age=3600');
 
-    await pipeline(Readable.fromWeb(upstream.body), res);
+    let totalBytes = 0;
+    const byteLimitTransform = new Transform({
+      transform(chunk, encoding, callback) {
+        totalBytes += chunk.length;
+        if (totalBytes > maxMediaBytes) {
+          callback(new Error('媒體超過大小上限'));
+          return;
+        }
+        callback(null, chunk);
+      }
+    });
+    await pipeline(Readable.fromWeb(upstream.body), byteLimitTransform, res);
   } catch (error) {
     if (!res.headersSent) {
       const message = error?.name === 'AbortError' ? '下載逾時' : (error?.message || '下載失敗');
@@ -302,10 +472,63 @@ app.get('/api/media', mediaLimiter, async (req, res) => {
   }
 });
 
+// 即時 YouTube 下載連結（解決 CDN URL 時效問題）
+const YTDLP_BIN2 = process.platform === 'win32'
+  ? path.resolve(__dirname, '../node_modules/youtube-dl-exec/bin/yt-dlp.exe')
+  : path.resolve(__dirname, '../node_modules/youtube-dl-exec/bin/yt-dlp');
+
+app.get('/api/yt-fresh', async (req, res) => {
+  try {
+    const rawUrl = String(req.query.url || '');
+    const quality = String(req.query.q || 'best');
+    if (!rawUrl) return res.status(400).json({ success: false, error: '缺少 YouTube 網址' });
+    const videoId = extractVideoId(rawUrl);
+    if (!videoId) return res.status(400).json({ success: false, error: '找不到 YouTube 影片 ID' });
+
+    // yt-dlp
+    if (existsSync(YTDLP_BIN2)) {
+      try {
+        const formatArg = quality === 'best' ? 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
+          : `bestvideo[height<=${quality}][ext=mp4]+bestaudio[ext=m4a]/best[height<=${quality}][ext=mp4]/best`;
+        const url = await new Promise((resolve, reject) => {
+          execFile(YTDLP_BIN2, [`https://www.youtube.com/watch?v=${videoId}`, '-g', '--no-playlist', '-f', formatArg],
+            { timeout: 25_000, maxBuffer: 1024 * 1024 }, (err, stdout) => {
+              if (err) { reject(err); return; }
+              resolve(stdout.trim().split('\n')[0]);
+            });
+        });
+        if (url) return res.json({ success: true, url, videoId, quality });
+      } catch { /* next */ }
+    }
+
+    // @distube/ytdl-core 備援
+    try {
+      const { default: ytdl } = await import('@distube/ytdl-core');
+      let info;
+      for (const client of ['web', 'ios', 'android']) {
+        try { info = await ytdl.getInfo(rawUrl, { clients: [client] }); if (info?.formats?.some(f => f.url)) break; }
+        catch { continue; }
+      }
+      if (info) {
+        const fmts = info.formats.filter(f => f.url);
+        const best = fmts.filter(f => f.hasAudio && f.hasVideo).sort((a, b) => (b.height || 0) - (a.height || 0))[0]
+          || fmts.filter(f => f.hasVideo).sort((a, b) => (b.height || 0) - (a.height || 0))[0]
+          || fmts[0];
+        if (best?.url) return res.json({ success: true, url: best.url, videoId, quality });
+      }
+    } catch { /* failed */ }
+
+    return res.status(404).json({ success: false, error: '無法取得即時下載連結' });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error instanceof Error ? error.message : '取得連結失敗' });
+  }
+});
+
 app.use(express.static(publicDir, {
   index: 'index.html',
   extensions: ['html'],
-  maxAge: process.env.NODE_ENV === 'production' ? '1h' : 0
+  maxAge: 0,
+  etag: false
 }));
 
 app.use((req, res, next) => {

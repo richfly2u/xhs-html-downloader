@@ -1,5 +1,6 @@
 import { probeMedia } from './resolver.js';
-import { assertHttpUrl, assertPublicResolution, isMediaHost, unique } from './utils.js';
+import { assertHttpUrl, assertPublicResolution, unique } from './utils.js';
+import { isMediaHost } from './platforms/index.js';
 
 const OPENAI_API_BASE = 'https://api.openai.com/v1';
 const GROQ_API_BASE = 'https://api.groq.com/openai/v1';
@@ -22,15 +23,17 @@ function splitSentences(text) {
     .filter(Boolean);
 }
 
-function extractKeywords(text) {
-  const source = cleanText(text);
-  const hashtags = [...source.matchAll(/#([^#\s，。！？、]+)/gu)].map((match) => match[1]);
-  const common = [
-    '料理', '素食', '美食', '食譜', '旅遊', '景點', '穿搭', '保養', '健身', '減脂',
-    '生活', '收納', '教學', '開箱', '手機', '電腦', 'AI', '影片', '攝影', '寵物',
-    '狗狗', '貓咪', '親子', '工作', '創業', '省錢', '推薦', '心得', '技巧', '分享'
-  ].filter((word) => source.toLowerCase().includes(word.toLowerCase()));
+const HASHTAG_RE = /#([^#\s，。！？、]+)/gu;
+const COMMON_KEYWORDS = [
+  '料理', '素食', '美食', '食譜', '旅遊', '景點', '穿搭', '保養', '健身', '減脂',
+  '生活', '收納', '教學', '開箱', '手機', '電腦', 'AI', '影片', '攝影', '寵物',
+  '狗狗', '貓咪', '親子', '工作', '創業', '省錢', '推薦', '心得', '技巧', '分享'
+];
 
+function extractKeywords(text) {
+  const source = cleanText(text).toLowerCase();
+  const hashtags = [...source.matchAll(HASHTAG_RE)].map((match) => match[1]);
+  const common = COMMON_KEYWORDS.filter((word) => source.includes(word.toLowerCase()));
   return unique([...hashtags, ...common]).slice(0, 10);
 }
 
@@ -65,20 +68,22 @@ function shorten(text, max = 92) {
 }
 
 function localAnalysis({ title, description, transcript }) {
+  const cleanTitle = cleanText(title || '');
   const body = cleanText([description, transcript].filter(Boolean).join('\n\n'));
+  const combined = cleanTitle ? `${cleanTitle}\n${body}` : body;
   const sentences = splitSentences(body);
-  const hook = cleanText(title) || sentences[0] || '從觀眾最在意的問題開始切入';
-  const keywords = extractKeywords(`${title || ''}\n${body}`);
+  const hook = cleanTitle || sentences[0] || '從觀眾最在意的問題開始切入';
+  const keywords = extractKeywords(combined);
   const strengths = [];
   const improvements = [];
 
-  if (title) strengths.push('主題明確，觀眾能快速理解內容方向');
+  if (cleanTitle) strengths.push('主題明確，觀眾能快速理解內容方向');
   if (sentences.length >= 3) strengths.push('內容具備一定資訊量與敘事層次');
   if (keywords.length) strengths.push('已有可延伸為搜尋標籤的主題關鍵字');
   if (/[！!？?]/u.test(body)) strengths.push('語氣具有情緒或提問感，較容易吸引注意');
   if (!strengths.length) strengths.push('內容簡潔，適合再加工成短影音文案');
 
-  if (!title || title.length < 8) improvements.push('補上一句更具利益點或好奇心的標題');
+  if (!cleanTitle || cleanTitle.length < 8) improvements.push('補上一句更具利益點或好奇心的標題');
   if (!/你|大家|一起|留言|收藏|分享|試試|快來/u.test(body)) improvements.push('增加與觀眾對話的語句及明確行動呼籲');
   if (body.length < 60) improvements.push('補充一個具體情境、成果或關鍵細節，提升可信度');
   if (body.length > 500) improvements.push('刪減重複句，將重點整理成 3 至 5 個短段落');
@@ -90,7 +95,7 @@ function localAnalysis({ title, description, transcript }) {
     : '#實用分享 #生活靈感 #值得收藏';
   const core = body || '這段內容值得整理成更有吸引力的短影音文案。';
   const optimizedCopy = [
-    `【${cleanText(title) || '你一定要知道的實用分享'}】`,
+    `【${cleanTitle || '你一定要知道的實用分享'}】`,
     shorten(sentences[0] || core, 70),
     '',
     shorten(core, 320),
@@ -102,7 +107,7 @@ function localAnalysis({ title, description, transcript }) {
   return {
     summary: shorten(core, 120),
     hook: shorten(hook, 80),
-    audience: inferAudience(`${title || ''}\n${body}`),
+    audience: inferAudience(combined),
     structure: detectStructure(body),
     strengths: strengths.slice(0, 4),
     improvements: improvements.slice(0, 4),
@@ -161,15 +166,13 @@ function buildAnalysisInput({ title, description, transcript }) {
   ].filter(Boolean).join('\n\n');
 }
 
-function analysisSystemPrompt() {
-  return [
-    '你是繁體中文短影音文案與口播稿顧問。',
-    '請根據使用者提供的標題、貼文文案與影片逐字稿分析，不得捏造不存在的資訊。',
-    'optimizedCopy 必須是一份可直接朗讀或發布的繁體中文優化稿：開頭吸睛、語句口語自然、刪除贅詞、保留原意、段落清楚，結尾加入合適行動呼籲。',
-    '只輸出 JSON，不要 Markdown，不要解釋。JSON 欄位固定為：summary、hook、audience、structure、strengths、improvements、keywords、optimizedCopy。',
-    'strengths 與 improvements 為字串陣列；keywords 不要加 #；其餘欄位為字串。'
-  ].join('');
-}
+const ANALYSIS_SYSTEM_PROMPT = [
+  '你是繁體中文短影音文案與口播稿顧問。',
+  '請根據使用者提供的標題、貼文文案與影片逐字稿分析，不得捏造不存在的資訊。',
+  'optimizedCopy 必須是一份可直接朗讀或發布的繁體中文優化稿：開頭吸睛、語句口語自然、刪除贅詞、保留原意、段落清楚，結尾加入合適行動呼籲。',
+  '只輸出 JSON，不要 Markdown，不要解釋。JSON 欄位固定為：summary、hook、audience、structure、strengths、improvements、keywords、optimizedCopy。',
+  'strengths 與 improvements 為字串陣列；keywords 不要加 #；其餘欄位為字串。'
+].join('');
 
 async function groqJsonAnalysis({ title, description, transcript }) {
   const apiKey = process.env.GROQ_API_KEY;
@@ -186,7 +189,7 @@ async function groqJsonAnalysis({ title, description, transcript }) {
     body: JSON.stringify({
       model,
       messages: [
-        { role: 'system', content: analysisSystemPrompt() },
+        { role: 'system', content: ANALYSIS_SYSTEM_PROMPT },
         { role: 'user', content: input }
       ],
       response_format: { type: 'json_object' },
@@ -245,7 +248,7 @@ async function openAIJsonAnalysis({ title, description, transcript }) {
     model,
     store: false,
     max_output_tokens: 2200,
-    instructions: analysisSystemPrompt(),
+    instructions: ANALYSIS_SYSTEM_PROMPT,
     input,
     text: {
       format: {

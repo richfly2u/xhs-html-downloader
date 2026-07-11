@@ -1,11 +1,12 @@
 {
   "name": "xhs-html-downloader",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "private": true,
   "description": "Vercel-ready HTML frontend for resolving public Xiaohongshu media and automatically analyzing captions, with optional AI transcription.",
   "type": "module",
   "main": "src/index.js",
   "scripts": {
+    "postinstall": "node scripts/postinstall.mjs",
     "start": "node src/local.js",
     "dev": "node --watch src/local.js",
     "test": "node --test"
@@ -20,6 +21,10 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "express-rate-limit": "^7.5.0",
-    "helmet": "^8.0.0"
+    "helmet": "^8.0.0",
+    "page-agent": "^1.10.0",
+    "socks-proxy-agent": "^10.1.0",
+    "youtube-dl-exec": "^3.1.8",
+    "youtubei.js": "^17.0.1"
   }
 }

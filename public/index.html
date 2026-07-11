@@ -1,15 +1,16 @@
 <!doctype html>
-<html lang="zh-Hant">
+<html lang="zh-Hant" data-theme="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#f64f63">
-  <meta name="description" content="貼上小紅書公開分享文字或連結，解析影片、圖片，並自動分析貼文文案。">
-  <title>小紅書媒體解析器</title>
+  <meta name="theme-color" content="#171416">
+  <meta name="description" content="貼上小紅書、抖音、TikTok、YouTube、Facebook 分享連結，解析影片、圖片與文案。">
+  <title>全平台媒體解析器</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="stylesheet" href="/styles.css">
-  <script src="/app.js" defer></script>
+  <link rel="stylesheet" href="/styles.css?v=20260710-0905">
+  <script src="https://cdn.jsdelivr.net/npm/page-agent@1.10.0/dist/iife/page-agent.demo.js" crossorigin="true"></script>
+  <script src="/app.js?v=20260710-0905" defer></script>
 </head>
 <body>
   <div class="ambient ambient-one"></div>
@@ -20,7 +21,7 @@
       <span class="brand-mark" aria-hidden="true">
         <svg viewBox="0 0 24 24"><path d="M8.1 5.2c0-1.5 1.7-2.4 2.9-1.5l8.2 6.3c1 .8 1 2.3 0 3.1L11 19.4c-1.2.9-2.9 0-2.9-1.5V5.2Z"/></svg>
       </span>
-      <span><strong>紅媒體</strong><small>公開分享解析器</small></span>
+      <span><strong>全平台</strong><small>公開分享解析器</small></span>
     </a>
     <button class="icon-button" id="themeButton" type="button" aria-label="切換深色模式" title="切換深色模式">
       <svg class="sun-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3V1m0 22v-2m9-9h2M1 12h2m16.4-7.4 1.4-1.4M3.2 20.8l1.4-1.4m14.8 0 1.4 1.4M3.2 3.2l1.4 1.4M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10Z"/></svg>
@@ -31,7 +32,7 @@
     <section class="hero">
       <div class="eyebrow"><span></span> HTML 網頁版</div>
       <h1>貼上連結，<em>提取影片、圖片與文案</em></h1>
-      <p>支援小紅書公開分享文字、短連結，以及小紅書 CDN 媒體直連。無需微信小程序，電腦與手機瀏覽器皆可操作。</p>
+      <p>支援小紅書、抖音、TikTok、YouTube、Facebook 等公開分享連結與媒體直連。無需額外 App，電腦與手機瀏覽器皆可操作。</p>
     </section>
 
     <section class="parse-card" aria-labelledby="parse-title">
@@ -96,6 +97,7 @@
           <div class="result-meta-top">
             <span class="media-type" id="mediaType">媒體</span>
             <span class="parser-label" id="parserLabel"></span>
+            <span class="parser-label platform-label" id="platformLabel"></span>
           </div>
           <h3 id="resultTitle">未命名作品</h3>
           <p class="author-line is-hidden" id="authorLine"></p>
@@ -107,16 +109,28 @@
             <div><dt>項目</dt><dd id="countValue">—</dd></div>
           </dl>
 
+          <div class="format-picker is-hidden" id="formatPicker">
+            <div class="format-picker-list" id="formatList"></div>
+          </div>
+
           <div class="result-actions">
-            <a class="button button-primary" id="downloadButton" href="#" download>
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 20h14"/></svg>
-              <span id="downloadLabel">下載影片</span>
-            </a>
-            <button class="button button-secondary" id="copyLinkButton" type="button">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 15 15 9m-7.5 2.5-2 2a3.5 3.5 0 0 0 5 5l2-2m4-9 2-2a3.5 3.5 0 0 0-5-5l-2 2"/></svg>
-              複製直連
-            </button>
-            <button class="button button-ghost is-hidden" id="copyTextButton" type="button">複製優化稿</button>
+            <div class="result-actions-primary">
+              <button class="button button-primary" id="downloadButton" type="button">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 20h14"/></svg>
+                <span id="downloadLabel">下載影片</span>
+              </button>
+              <button class="button button-secondary" id="copyLinkButton" type="button">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 15 15 9m-7.5 2.5-2 2a3.5 3.5 0 0 0 5 5l2-2m4-9 2-2a3.5 3.5 0 0 0-5-5l-2 2"/></svg>
+                複製直連
+              </button>
+            </div>
+            <div class="result-actions-secondary">
+              <button class="button button-ghost" id="coverDownloadButton" type="button">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 16v4h16v-4M12 4v12m0 0 4-4m-4 4-4-4"/></svg>
+                下載封面
+              </button>
+              <button class="button button-ghost is-hidden" id="copyTextButton" type="button">複製優化稿</button>
+            </div>
           </div>
         </div>
       </article>
@@ -214,12 +228,13 @@
       <div class="how-icon">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9M12 8v5l3 2m2-12v5h5"/></svg>
       </div>
-      <div><h2>解析方式</h2><p>後端先展開分享短網址，再從公開頁面的結構化資料與媒體標籤中尋找小紅書 CDN 資源。若頁面要求登入或出現驗證，工具不會嘗試繞過。</p></div>
+      <div><h2>解析方式</h2><p>後端先判斷平台並展開分享短網址，再從公開頁面的結構化資料與媒體標籤中尋找可解析資源。若頁面要求登入或出現驗證，工具不會嘗試繞過。</p></div>
     </section>
   </main>
 
   <footer>
     <p>請尊重作者權利、平台規範及適用法律。工具僅提供公開媒體的技術解析。</p>
+    <p class="version-info">v0.4.6 — 2026-06-19</p>
   </footer>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>

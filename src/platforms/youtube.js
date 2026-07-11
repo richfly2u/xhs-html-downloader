@@ -1,129 +1,533 @@
-import { assertAllowedHost, assertHttpUrl, assertPublicResolution, extractFirstUrl, formatBytes } from '../utils.js';
+import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import ytdl from '@distube/ytdl-core';
+import { Innertube } from 'youtubei.js';
+import { assertHttpUrl, assertPublicResolution, extractFirstUrl, formatBytes } from '../utils.js';
 
-const DEFAULT_YOUTUBE_PROXY_URL = process.env.YOUTUBE_PROXY_URL || process.env.YT_DLP_API_URL || 'http://108.61.163.87:8799/api/yt-dlp';
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export const id = 'youtube';
-export const label = 'YouTube';
-export const shareHosts = [
+function findYtDlp() {
+  const paths = [
+    path.resolve(__dirname, '../../node_modules/.bin/yt-dlp' + (process.platform === 'win32' ? '.exe' : '')),
+    path.resolve(__dirname, '../../node_modules/youtube-dl-exec/bin/yt-dlp' + (process.platform === 'win32' ? '.exe' : '')),
+    'yt-dlp'
+  ];
+  return paths.find((candidate) => candidate === 'yt-dlp' || existsSync(candidate)) || null;
+}
+
+const YTDLP_BIN = findYtDlp();
+const YTDLP_AVAILABLE = Boolean(YTDLP_BIN);
+const YTDLP_STRATEGIES = [
+  [],
+  ['--extractor-args', 'youtube:player_client=android'],
+  ['--extractor-args', 'youtube:player_client=ios'],
+  ['--extractor-args', 'youtube:player_client=web']
+];
+const DEFAULT_YOUTUBE_COOKIES_PATH = path.resolve(__dirname, '../../.secrets/youtube-cookies.txt');
+
+export const name = 'youtube';
+
+export const hosts = new Set([
   'youtube.com',
   'www.youtube.com',
   'm.youtube.com',
-  'music.youtube.com',
   'youtu.be',
-  'www.youtu.be'
-];
+  'music.youtube.com'
+]);
 
-function normalizeFormatSize(format) {
-  if (format.size) return format.size;
-  if (Number.isFinite(format.size_mb)) return `${format.size_mb} MB`;
-  if (Number.isFinite(format.filesize)) return formatBytes(format.filesize);
-  return null;
+export const mediaHosts = new Set([
+  'googlevideo.com',
+  'ytimg.com',
+  'youtube.com'
+]);
+
+export function isMediaHost(hostname = '') {
+  const lower = hostname.toLowerCase();
+  return lower.endsWith('.googlevideo.com') ||
+    lower.endsWith('.ytimg.com') ||
+    lower === 'ytimg.com';
 }
 
-function mapVideoFormat(format) {
-  return {
-    hasVideo: true,
-    label: format.label || (format.height ? `${format.height}p` : format.format || '影片'),
-    height: Number(format.height) || 0,
-    fps: format.fps || '',
-    ext: format.ext || 'mp4',
-    vcodec: format.vcodec || '',
-    acodec: format.acodec || '',
-    size: normalizeFormatSize(format),
-    url: format.url || '',
-    formatId: format.format_id || format.itag || ''
-  };
-}
-
-function mapAudioFormat(format) {
-  return {
-    hasAudio: true,
-    label: format.label || (format.abr ? `${format.abr}k` : format.format || '音訊'),
-    abr: Number(format.abr) || 0,
-    ext: format.ext || 'm4a',
-    acodec: format.acodec || '',
-    size: normalizeFormatSize(format),
-    url: format.url || '',
-    formatId: format.format_id || format.itag || ''
-  };
-}
-
-function getJsonBody(body) {
-  if (!body || typeof body !== 'object') return {};
-  return body;
-}
-
-export function isYouTubeUrl(input = '') {
-  const extracted = extractFirstUrl(input) || input;
+export function detect(input) {
   try {
-    const url = assertHttpUrl(extracted);
-    return shareHosts.some((host) => url.hostname.toLowerCase() === host);
+    const parsed = new URL(input);
+    return hosts.has(parsed.hostname.toLowerCase()) ||
+      parsed.hostname.toLowerCase().endsWith('.youtube.com');
   } catch {
     return false;
   }
 }
 
-export async function resolveShare(input, options = {}) {
-  const extracted = extractFirstUrl(input) || input;
-  const source = assertAllowedHost(assertHttpUrl(extracted), shareHosts, label);
-  if (!options.skipDnsCheck) await assertPublicResolution(source.hostname);
+export function extractVideoId(url) {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    if (host === 'youtu.be') return parsed.pathname.slice(1).split('/')[0] || null;
+    const shortsMatch = parsed.pathname.match(/\/shorts\/([a-zA-Z0-9_-]{11})/);
+    if (shortsMatch) return shortsMatch[1];
+    const liveMatch = parsed.pathname.match(/\/live\/([a-zA-Z0-9_-]{11})/);
+    if (liveMatch) return liveMatch[1];
+    const embedMatch = parsed.pathname.match(/\/embed\/([a-zA-Z0-9_-]{11})/);
+    if (embedMatch) return embedMatch[1];
+    const legacyMatch = parsed.pathname.match(/\/v\/([a-zA-Z0-9_-]{11})/);
+    if (legacyMatch) return legacyMatch[1];
+    return parsed.searchParams.get('v') || null;
+  } catch {
+    return null;
+  }
+}
 
-  const proxyUrl = assertHttpUrl(options.youtubeProxyUrl || DEFAULT_YOUTUBE_PROXY_URL);
-  if (!['http:', 'https:'].includes(proxyUrl.protocol)) {
-    throw new Error('YouTube 代理服務網址必須是 HTTP 或 HTTPS');
+async function readTextWithLimit(response, maxBytes) {
+  if (!response.body) return '';
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let received = 0;
+  let output = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    received += value.byteLength;
+    if (received > maxBytes) {
+      await reader.cancel('response too large');
+      throw new Error('YouTube page is too large to parse safely');
+    }
+    output += decoder.decode(value, { stream: true });
+  }
+  output += decoder.decode();
+  return output;
+}
+
+function decodeHtml(value = '') {
+  return String(value)
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>');
+}
+
+function extractMeta(html, name) {
+  const pattern = new RegExp(`<meta\\s+(?:name|property)=["']${name}["'][^>]*content=["']([^"']*)["']`, 'i');
+  return decodeHtml(html.match(pattern)?.[1] || '');
+}
+
+function hasAudioTrack(format = {}) {
+  return Boolean(format.hasAudio ||
+    format.audioChannels ||
+    format.audioBitrate ||
+    (format.acodec && format.acodec !== 'none'));
+}
+
+function hasVideoTrack(format = {}) {
+  return Boolean(format.hasVideo ||
+    format.width ||
+    format.height ||
+    (format.vcodec && format.vcodec !== 'none'));
+}
+
+function pickFormat(formats = []) {
+  const usable = formats.filter((format) => format?.url);
+  return usable.filter((format) => hasAudioTrack(format) && hasVideoTrack(format))
+    .sort((a, b) => (b.height || 0) - (a.height || 0))[0] ||
+    usable.filter(hasVideoTrack).sort((a, b) => (b.height || 0) - (a.height || 0))[0] ||
+    usable.find(hasAudioTrack) ||
+    usable[0] ||
+    null;
+}
+
+function preferPreviewFormat(formats = []) {
+  const usable = formats.filter((format) => format?.url && hasAudioTrack(format) && hasVideoTrack(format));
+  const byPreference = (items) => items.sort((a, b) =>
+    (Number(a.height) || 0) - (Number(b.height) || 0) ||
+    (Number(a.tbr || a.bitrate || 0)) - (Number(b.tbr || b.bitrate || 0))
+  );
+
+  return byPreference(usable.filter((format) =>
+    Number(format.height) > 0 &&
+    Number(format.height) <= 480 &&
+    String(format.ext || '').toLowerCase() === 'mp4'
+  ))[0] ||
+    byPreference(usable.filter((format) =>
+      Number(format.height) > 0 &&
+      Number(format.height) <= 720 &&
+      String(format.ext || '').toLowerCase() === 'mp4'
+    ))[0] ||
+    byPreference(usable.filter((format) =>
+      Number(format.height) > 0 &&
+      Number(format.height) <= 480
+    ))[0] ||
+    byPreference(usable.filter((format) =>
+      Number(format.height) > 0 &&
+      Number(format.height) <= 720
+    ))[0] ||
+    byPreference(usable.filter((format) =>
+      Number(format.height) > 0 &&
+      Number(format.height) <= 1080 &&
+      String(format.ext || '').toLowerCase() === 'mp4'
+    ))[0] ||
+    usable[0] ||
+    null;
+}
+
+function formatCodec(value) {
+  if (!value || value === 'none') return null;
+  return String(value).split('.')[0].toUpperCase();
+}
+
+function formatSize(value) {
+  const bytes = Number(value);
+  return Number.isFinite(bytes) && bytes > 0 ? formatBytes(bytes) : null;
+}
+
+function qualityLabel(height = 0, fallback = '') {
+  const h = Number(height) || 0;
+  if (!h && fallback) return String(fallback);
+  if (h >= 2160) return '2160p';
+  if (h >= 1440) return '1440p';
+  if (h >= 1080) return '1080p';
+  if (h >= 720) return '720p';
+  if (h >= 480) return '480p';
+  if (h >= 360) return '360p';
+  if (h > 0) return `${h}p`;
+  return 'audio';
+}
+
+function codecFromMime(mimeType = '') {
+  return mimeType.match(/codecs="([^"]+)"/)?.[1] || null;
+}
+
+function normalizeFormat(format = {}) {
+  const height = Number(format.height) || 0;
+  const hasAudio = hasAudioTrack(format);
+  const hasVideo = hasVideoTrack(format);
+  const bitrate = Number(format.tbr || format.bitrate || format.abr || format.audioBitrate) || 0;
+  return {
+    id: String(format.format_id || format.itag || ''),
+    label: qualityLabel(height, format.qualityLabel || format.quality),
+    height,
+    url: format.url,
+    hasAudio,
+    hasVideo,
+    bitrate,
+    downloadFormat: String(format.format_id || format.itag || ''),
+    size: formatSize(format.contentLength || format.filesize || format.filesize_approx),
+    codec: [
+      formatCodec(format.vcodec || codecFromMime(format.mimeType)),
+      formatCodec(format.acodec)
+    ].filter(Boolean).join(' / ') || null,
+    ext: format.container ||
+      format.ext ||
+      format.mimeType?.match(/video\/([^;]+)/)?.[1] ||
+      format.mimeType?.match(/audio\/([^;]+)/)?.[1] ||
+      null
+  };
+}
+
+function collectFormats(formats = []) {
+  const seen = new Set();
+  const video = [];
+  const audio = [];
+  const sorted = formats.filter((format) => format?.url).sort((a, b) => {
+    const aHasVideo = hasVideoTrack(a);
+    const bHasVideo = hasVideoTrack(b);
+    if (aHasVideo !== bHasVideo) return aHasVideo ? -1 : 1;
+    return (b.height || 0) - (a.height || 0) ||
+      (Number(b.tbr || b.bitrate || b.abr || b.audioBitrate) || 0) -
+      (Number(a.tbr || a.bitrate || a.abr || a.audioBitrate) || 0);
+  });
+
+  for (const format of sorted) {
+    const item = normalizeFormat(format);
+    const key = item.hasVideo
+      ? `video-${item.height}`
+      : `audio-${item.ext || ''}-${item.codec || ''}-${Math.round(item.bitrate)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (item.hasVideo && item.id) {
+      video.push({
+        ...item,
+        hasAudio: true,
+        merged: !item.hasAudio,
+        downloadFormat: item.hasAudio ? item.id : `${item.id}+bestaudio/best`
+      });
+    }
+    else if (item.hasAudio) audio.push({
+      ...item,
+      label: item.bitrate ? `${Math.round(item.bitrate)}k` : item.label,
+      downloadFormat: item.id || 'bestaudio'
+    });
+  }
+  return [
+    ...video.sort((a, b) => b.height - a.height || b.bitrate - a.bitrate).slice(0, 3),
+    ...audio.sort((a, b) => b.bitrate - a.bitrate).slice(0, 2)
+  ];
+}
+
+function getCookieArgs() {
+  const cookiePath = process.env.YTDLP_COOKIES_PATH ||
+    process.env.YOUTUBE_COOKIES_PATH ||
+    DEFAULT_YOUTUBE_COOKIES_PATH;
+  return cookiePath && existsSync(cookiePath) ? ['--cookies', cookiePath] : [];
+}
+
+async function ytDlpWithFallback(url) {
+  const errors = [];
+  const common = [
+    url,
+    '-j',
+    '--no-playlist',
+    '--no-warnings',
+    ...getCookieArgs()
+  ];
+
+  for (const extra of YTDLP_STRATEGIES) {
+    try {
+      return await new Promise((resolve, reject) => {
+        execFile(YTDLP_BIN, [...common, ...extra], {
+          timeout: 45_000,
+          maxBuffer: 50 * 1024 * 1024
+        }, (error, stdout, stderr) => {
+          if (error) {
+            reject(new Error((stderr || error.message || '').trim().slice(0, 500)));
+            return;
+          }
+          try {
+            resolve(JSON.parse(stdout));
+          } catch {
+            reject(new Error('yt-dlp returned invalid JSON'));
+          }
+        });
+      });
+    } catch (error) {
+      errors.push(`${extra[1]?.split('=')[1] || 'default'}: ${error.message}`);
+    }
   }
 
-  const response = await fetch(proxyUrl.toString(), {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ url: source.toString() }),
-    signal: AbortSignal.timeout(options.timeoutMs || 30_000)
-  });
-  const payload = getJsonBody(await response.json().catch(() => ({})));
+  throw new Error(errors.join('; '));
+}
 
-  if (!response.ok || payload.success === false) {
-    const error = new Error(payload.error || `YouTube 解析失敗：HTTP ${response.status}`);
-    error.code = 'YOUTUBE_PROXY_FAILED';
+function applyYtDlpInfo(result, info = {}) {
+  const formats = info.formats || [];
+  const best = pickFormat(formats);
+  const preview = preferPreviewFormat(formats);
+  const requested = info.requested_downloads?.find((item) => item.url) ||
+    (Array.isArray(info.requested_formats) ? info.requested_formats.find((item) => item.url) : null);
+
+  result.videoUrl = requested?.url || best?.url || info.url || result.videoUrl;
+  result.previewVideoUrl = preview?.url || result.previewVideoUrl || result.videoUrl;
+  result.formats = collectFormats(formats);
+  result.title = result.title || info.title || null;
+  result.description = result.description || (info.description || '').slice(0, 5000) || null;
+  result.author = result.author || info.uploader || info.channel || null;
+  result.cover = result.cover || info.thumbnail || null;
+  result.parser = 'yt-dlp';
+  return result;
+}
+
+function parsePlayerData(html) {
+  const match = html.match(/ytInitialPlayerResponse\s*=\s*({.+?})\s*;\s*(?:<\/script>|var\s)/s);
+  if (!match) return null;
+  try {
+    return JSON.parse(match[1]);
+  } catch {
+    return null;
+  }
+}
+
+export function parseWatchPage(html, finalUrl) {
+  const videoId = extractVideoId(finalUrl);
+  const playerData = parsePlayerData(html);
+  const title = extractMeta(html, 'title') ||
+    decodeHtml(html.match(/<title>([^<]+)<\/title>/i)?.[1] || '').replace(' - YouTube', '') ||
+    null;
+  const author = html.match(/<link\s+itemprop="name"\s+content="([^"]+)"/i)?.[1] || null;
+  const description = extractMeta(html, 'description') || null;
+
+  let videoUrl = null;
+  let previewVideoUrl = null;
+  let formats = [];
+  if (playerData?.streamingData) {
+    const pageFormats = [
+      ...(playerData.streamingData.formats || []),
+      ...(playerData.streamingData.adaptiveFormats || [])
+    ];
+    videoUrl = pickFormat(pageFormats)?.url || null;
+    previewVideoUrl = preferPreviewFormat(pageFormats)?.url || null;
+    formats = collectFormats(pageFormats);
+  }
+
+  const cover = playerData?.videoDetails?.thumbnail?.thumbnails?.slice(-1)[0]?.url ||
+    (videoId ? `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg` : null);
+
+  if (!videoId && !videoUrl) {
+    const error = new Error('No downloadable YouTube media was found');
+    error.code = 'MEDIA_NOT_FOUND';
     throw error;
   }
 
-  const videoFormats = (payload.video_formats || payload.videoFormats || []).map(mapVideoFormat);
-  const audioFormats = (payload.audio_formats || payload.audioFormats || []).map(mapAudioFormat);
-  const bestUrl =
-    payload.best_url ||
-    payload.bestUrl ||
-    videoFormats.find((format) => format.url)?.url ||
-    audioFormats.find((format) => format.url)?.url ||
-    '';
-  const title = payload.title || 'YouTube 影片';
-
   return {
-    platform: id,
-    platformLabel: label,
-    sourceUrl: source.toString(),
-    noteId: payload.id || payload.video_id || null,
+    sourceUrl: finalUrl,
+    noteId: videoId,
     title,
-    description: payload.description || '',
-    author: payload.uploader || payload.channel || '',
-    cover: payload.thumbnail || '',
-    type: 'video',
-    videoUrl: bestUrl || null,
-    alternatives: videoFormats.map((format) => format.url).filter(Boolean).slice(0, 8),
+    description,
+    author,
+    cover,
+    type: videoId ? 'video' : null,
+    videoUrl,
+    previewVideoUrl,
+    alternatives: [],
+    formats,
     images: [],
-    parser: 'yt-dlp-vps',
-    duration: payload.duration || 0,
-    video: bestUrl ? {
-      kind: 'video',
-      directUrl: bestUrl,
-      previewUrl: bestUrl,
-      downloadUrl: bestUrl,
-      bytes: null,
-      size: null,
-      contentType: 'video/mp4'
-    } : null,
-    format: 'MP4',
-    videoFormats,
-    audioFormats,
-    formats: [...videoFormats, ...audioFormats]
+    parser: playerData ? 'initial-state' : 'page-media-scan',
+    platform: 'youtube'
   };
+}
+
+async function expandAndFetchPage(rawUrl, options) {
+  const input = assertHttpUrl(rawUrl);
+  await assertPublicResolution(input.hostname);
+
+  const response = await fetch(input, {
+    redirect: 'follow',
+    headers: {
+      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/134.0 Safari/537.36',
+      accept: 'text/html,application/xhtml+xml,*/*',
+      'accept-language': 'en-US,en;q=0.9'
+    },
+    signal: AbortSignal.timeout(options.timeoutMs)
+  });
+  if (!response.ok) throw new Error(`YouTube page returned HTTP ${response.status}`);
+  const html = await readTextWithLimit(response, options.maxHtmlBytes);
+  return { html, finalUrl: response.url };
+}
+
+let innertube = null;
+async function getInnerTube() {
+  if (!innertube) innertube = await Innertube.create({ client_type: 'ANDROID', lang: 'en' });
+  return innertube;
+}
+
+export async function resolveShare(inputText, options) {
+  const extracted = extractFirstUrl(inputText);
+  if (!extracted) throw new Error('Please provide a YouTube URL');
+  const input = assertHttpUrl(extracted);
+  const videoId = extractVideoId(input.toString());
+  if (!videoId) throw new Error('Could not find a YouTube video ID');
+
+  const result = {
+    sourceUrl: input.toString(),
+    noteId: videoId,
+    title: null,
+    description: null,
+    author: null,
+    cover: `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
+    type: 'video',
+    videoUrl: null,
+    previewVideoUrl: null,
+    alternatives: [],
+    formats: [],
+    images: [],
+    parser: 'page-media-scan',
+    platform: 'youtube'
+  };
+  const failures = [];
+
+  if (YTDLP_AVAILABLE) {
+    try {
+      const info = await ytDlpWithFallback(input.toString());
+      applyYtDlpInfo(result, info);
+      if (result.videoUrl) return result;
+    } catch (error) {
+      const message = error.message || 'unknown yt-dlp error';
+      failures.push(`yt-dlp: ${message}`);
+      console.error('[youtube] yt-dlp failed:', message);
+    }
+  }
+
+  try {
+    const yt = await getInnerTube();
+    const info = await yt.getInfo(videoId);
+    const formats = [
+      ...(info.streaming_data?.formats || []),
+      ...(info.streaming_data?.adaptive_formats || [])
+    ];
+    const best = pickFormat(formats);
+    const preview = preferPreviewFormat(formats);
+    result.videoUrl = best?.url || result.videoUrl;
+    result.previewVideoUrl = preview?.url || result.previewVideoUrl || result.videoUrl;
+    result.formats = result.formats.length ? result.formats : collectFormats(formats);
+    result.title = info.basic_info?.title || result.title;
+    result.author = info.basic_info?.author || result.author;
+    result.description = (info.basic_info?.description || '').slice(0, 5000) || result.description;
+    result.cover = info.basic_info?.thumbnail?.[0]?.url || result.cover;
+    result.parser = 'innertube-api';
+    if (result.videoUrl) return result;
+  } catch (error) {
+    const message = error.message?.slice(0, 180) || 'unknown InnerTube error';
+    failures.push(`InnerTube: ${message}`);
+    console.error('[youtube] InnerTube failed:', message);
+  }
+
+  try {
+    const { html, finalUrl } = await expandAndFetchPage(input.toString(), options);
+    const pageResult = parseWatchPage(html, finalUrl);
+    Object.assign(result, {
+      ...pageResult,
+      title: result.title || pageResult.title,
+      description: result.description || pageResult.description,
+      author: result.author || pageResult.author,
+      cover: result.cover || pageResult.cover,
+      formats: result.formats.length ? result.formats : pageResult.formats
+    });
+    if (result.videoUrl) return result;
+  } catch (error) {
+    const message = error.message || 'unknown page scan error';
+    failures.push(`page scan: ${message}`);
+    console.error('[youtube] page scan failed:', message);
+  }
+
+  if (!result.videoUrl) {
+    try {
+      let info;
+      for (const client of ['web', 'ios', 'android']) {
+        try {
+          info = await ytdl.getInfo(input.toString(), { clients: [client] });
+          if (info?.formats?.some((format) => format.url)) break;
+        } catch {
+          continue;
+        }
+      }
+      if (info) {
+        const formats = info.formats || [];
+        const best = pickFormat(formats);
+        const preview = preferPreviewFormat(formats);
+        result.videoUrl = best?.url || result.videoUrl;
+        result.previewVideoUrl = preview?.url || result.previewVideoUrl || result.videoUrl;
+        result.title = result.title || info.videoDetails?.title || null;
+        result.description = result.description || info.videoDetails?.description?.slice(0, 5000) || null;
+        result.author = result.author || info.videoDetails?.author?.name || null;
+        result.cover = result.cover || info.videoDetails?.thumbnails?.slice(-1)[0]?.url || null;
+        result.formats = result.formats.length ? result.formats : collectFormats(formats);
+        result.parser = 'ytdl-core';
+      }
+    } catch (error) {
+      const message = error.message?.slice(0, 180) || 'unknown ytdl-core error';
+      failures.push(`ytdl-core: ${message}`);
+      console.error('[youtube] ytdl-core failed:', message);
+    }
+  }
+
+  if (!result.videoUrl) {
+    const detail = failures.find((item) => /Sign in|login|Private|Video unavailable|members-only|age/i.test(item)) ||
+      failures[0] ||
+      '';
+    const suffix = detail ? `（${detail.slice(0, 220)}）` : '';
+    const error = new Error(`無法取得這支 YouTube 影片的下載格式，請確認連結是公開影片，或稍後重新解析。${suffix}`);
+    error.code = 'MEDIA_NOT_FOUND';
+    throw error;
+  }
+
+  return result;
 }

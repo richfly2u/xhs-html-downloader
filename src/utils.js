@@ -1,16 +1,6 @@
+import { createHash, timingSafeEqual } from 'node:crypto';
 import dns from 'node:dns/promises';
 import net from 'node:net';
-
-const SHARE_HOSTS = new Set([
-  'xhslink.com',
-  'www.xhslink.com',
-  'xiaohongshu.com',
-  'www.xiaohongshu.com',
-  'm.xiaohongshu.com'
-]);
-
-export const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
-export const DEFAULT_MAX_HTML_BYTES = 4 * 1024 * 1024;
 
 export function extractFirstUrl(input = '') {
   const text = String(input).trim();
@@ -31,27 +21,6 @@ export function normalizeEscapedUrl(value = '') {
     .trim();
 }
 
-export function isShareHost(hostname = '') {
-  return SHARE_HOSTS.has(hostname.toLowerCase());
-}
-
-export function isMediaHost(hostname = '') {
-  const host = hostname.toLowerCase();
-  return host === 'xhscdn.com' || host.endsWith('.xhscdn.com');
-}
-
-export function hostMatches(hostname = '', allowedHosts = []) {
-  const host = hostname.toLowerCase();
-  return allowedHosts.some((allowed) => {
-    const rule = String(allowed).toLowerCase();
-    if (rule.startsWith('*.')) {
-      const suffix = rule.slice(1);
-      return host.endsWith(suffix) && host.length > suffix.length;
-    }
-    return host === rule;
-  });
-}
-
 export function assertHttpUrl(rawUrl) {
   let parsed;
   try {
@@ -66,87 +35,6 @@ export function assertHttpUrl(rawUrl) {
     throw new Error('網址不得包含帳號或密碼');
   }
   return parsed;
-}
-
-export function assertAllowedHost(url, allowedHosts, label = '平台') {
-  const parsed = typeof url === 'string' ? assertHttpUrl(url) : url;
-  if (!hostMatches(parsed.hostname, allowedHosts)) {
-    const error = new Error(`不支援的${label}網域`);
-    error.code = 'UNSUPPORTED_HOST';
-    throw error;
-  }
-  return parsed;
-}
-
-export async function readTextWithLimit(response, maxBytes = DEFAULT_MAX_HTML_BYTES) {
-  if (!response.body) return '';
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let received = 0;
-  let output = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    received += value.byteLength;
-    if (received > maxBytes) {
-      await reader.cancel('response too large');
-      const error = new Error('頁面內容超過安全上限，已停止解析');
-      error.code = 'RESPONSE_TOO_LARGE';
-      throw error;
-    }
-    output += decoder.decode(value, { stream: true });
-  }
-  output += decoder.decode();
-  return output;
-}
-
-export async function fetchTextWithPolicy(url, {
-  allowedHosts,
-  headers = {},
-  timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
-  maxBytes = DEFAULT_MAX_HTML_BYTES,
-  label = '平台',
-  skipDnsCheck = false,
-  maxRedirects = 5
-} = {}) {
-  let current = assertAllowedHost(assertHttpUrl(url), allowedHosts, label);
-
-  for (let redirectCount = 0; redirectCount <= maxRedirects; redirectCount += 1) {
-    if (!skipDnsCheck) await assertPublicResolution(current.hostname);
-    const response = await fetch(current, {
-      redirect: 'manual',
-      headers,
-      signal: AbortSignal.timeout(timeoutMs)
-    });
-
-    if ([301, 302, 303, 307, 308].includes(response.status)) {
-      const location = response.headers.get('location');
-      await response.body?.cancel();
-      if (!location) throw new Error(`${label}重新導向缺少目標網址`);
-      current = assertAllowedHost(new URL(location, current), allowedHosts, label);
-      continue;
-    }
-
-    if (!response.ok) {
-      await response.body?.cancel();
-      throw new Error(`${label}頁面讀取失敗：HTTP ${response.status}`);
-    }
-
-    const contentType = response.headers.get('content-type') || '';
-    if (!/text\/html|application\/json|text\/plain/i.test(contentType)) {
-      await response.body?.cancel();
-      throw new Error(`不支援的${label}回應格式：${contentType || '未知'}`);
-    }
-
-    return {
-      text: await readTextWithLimit(response, maxBytes),
-      finalUrl: current.toString(),
-      contentType
-    };
-  }
-
-  throw new Error(`${label}重新導向次數過多`);
 }
 
 function isPrivateIPv4(address) {
@@ -211,4 +99,33 @@ export function safeFilename(value = 'media', fallback = 'media') {
     .trim()
     .slice(0, 80);
   return cleaned || fallback;
+}
+
+// --- shared helpers for Vercel API handlers & Express ---
+
+export function secureDigest(value) {
+  return createHash('sha256').update(String(value || ''), 'utf8').digest();
+}
+
+export function codesEqual(left, right) {
+  return timingSafeEqual(secureDigest(left), secureDigest(right));
+}
+
+export function getProvidedCode(req, body) {
+  const headerCode = req.headers?.['x-ai-access-code'] ?? req.get?.('x-ai-access-code');
+  if (typeof headerCode === 'string' && headerCode.trim()) return headerCode.trim();
+  if (Array.isArray(headerCode) && headerCode[0]) return String(headerCode[0]).trim();
+  if (typeof body?.accessCode === 'string' && body.accessCode.trim()) return body.accessCode.trim();
+  return '';
+}
+
+export function parseRequestBody(req) {
+  if (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) return req.body;
+  if (typeof req.body === 'string') {
+    try { return JSON.parse(req.body); } catch { return {}; }
+  }
+  if (Buffer.isBuffer(req.body)) {
+    try { return JSON.parse(req.body.toString('utf8')); } catch { return {}; }
+  }
+  return {};
 }
