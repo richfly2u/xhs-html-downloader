@@ -506,7 +506,7 @@ async function parseCurrentInput() {
   setLoading(true);
   try {
     const isYT = isYouTubeLink(value);
-    const endpoint = isYT ? '/api/youtube' : '/api/parse';
+    const endpoint = '/api/parse';
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
