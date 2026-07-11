@@ -8,13 +8,14 @@ import { assertHttpUrl, assertPublicResolution, extractFirstUrl, formatBytes } f
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-function findYtDlp() {
+export function findYtDlp({ exists = existsSync } = {}) {
   const paths = [
+    process.env.YTDLP_PATH,
     path.resolve(__dirname, '../../node_modules/.bin/yt-dlp' + (process.platform === 'win32' ? '.exe' : '')),
     path.resolve(__dirname, '../../node_modules/youtube-dl-exec/bin/yt-dlp' + (process.platform === 'win32' ? '.exe' : '')),
     'yt-dlp'
-  ];
-  return paths.find((candidate) => candidate === 'yt-dlp' || existsSync(candidate)) || null;
+  ].filter(Boolean);
+  return paths.find((candidate) => candidate === 'yt-dlp' || exists(candidate)) || null;
 }
 
 const YTDLP_BIN = findYtDlp();
