@@ -276,10 +276,10 @@ function configureDownloadLink(link, url, directLabel) {
 
   link.dataset.external = isExternal ? '1' : '0';
   if (isExternal) {
-    link.target = '_blank';
-    link.rel = 'noopener noreferrer';
-    link.removeAttribute('download');
-    if (link === downloadButton) downloadLabel.textContent = directLabel;
+    // 走 Vercel proxy (HTTPS) 避免 Chrome 阻擋不安全下載
+    const proxyUrl = '/api/download?url=' + encodeURIComponent(url);
+    link.dataset.proxyUrl = proxyUrl;
+    if (link === downloadButton) downloadLabel.textContent = '下載';
   } else {
     link.removeAttribute('target');
     link.removeAttribute('rel');
@@ -674,7 +674,19 @@ function applyTheme(theme) {
 
 downloadButton.addEventListener('click', () => {
   if (downloadButton.dataset.external === '1') {
-    showToast('已開啟原始媒體');
+    const proxyUrl = downloadButton.dataset.proxyUrl;
+    if (proxyUrl) {
+      const a = document.createElement('a');
+      a.href = proxyUrl;
+      a.download = '';
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      showToast('下載中…');
+    } else {
+      showToast('無法取得下載連結');
+    }
   }
 });
 
