@@ -676,13 +676,8 @@ downloadButton.addEventListener('click', () => {
   if (downloadButton.dataset.external === '1') {
     const proxyUrl = downloadButton.dataset.proxyUrl;
     if (proxyUrl) {
-      const a = document.createElement('a');
-      a.href = proxyUrl;
-      a.download = '';
-      a.style.display = 'none';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
+      // 手機 Chrome 不支援程式化 click，直接導航到 proxy URL
+      window.location.href = proxyUrl;
       showToast('下載中…');
     } else {
       showToast('無法取得下載連結');
