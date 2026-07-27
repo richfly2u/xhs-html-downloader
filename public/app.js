@@ -672,16 +672,30 @@ function applyTheme(theme) {
   themeButton.setAttribute('aria-label', theme === 'dark' ? '切換淺色模式' : '切換深色模式');
 }
 
-downloadButton.addEventListener('click', () => {
+downloadButton.addEventListener('click', async (e) => {
   if (downloadButton.dataset.external === '1') {
+    e.preventDefault();
     const proxyUrl = downloadButton.dataset.proxyUrl;
-    if (proxyUrl) {
-      // 手機 Chrome 不支援程式化 click，直接導航到 proxy URL
-      window.location.href = proxyUrl;
-      showToast('下載中…');
-    } else {
-      showToast('無法取得下載連結');
+    if (!proxyUrl) { showToast('無法取得下載連結'); return; }
+    downloadLabel.textContent = '下載中…';
+    try {
+      const response = await fetch(proxyUrl);
+      if (!response.ok) throw new Error('伺服器回應錯誤');
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'download.mp4';
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      showToast('下載完成');
+    } catch (err) {
+      showToast('下載失敗');
     }
+    downloadLabel.textContent = '下載';
   }
 });
 
