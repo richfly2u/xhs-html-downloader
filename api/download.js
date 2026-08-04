@@ -4,7 +4,7 @@
  * GET /api/download?url=https://...
  */
 export default async function handler(req, res) {
-  const { url } = req.query;
+  const { url, title } = req.query;
 
   if (!url || typeof url !== 'string') {
     return res.status(400).json({ error: '缺少 url 參數' });
@@ -12,6 +12,16 @@ export default async function handler(req, res) {
 
   if (url.length > 2000) {
     return res.status(400).json({ error: 'URL 過長' });
+  }
+
+  // 檔名安全化：移除 Windows/Unix 非法字元、控制字元，限制長度
+  function safeName(raw) {
+    if (!raw || typeof raw !== 'string') return null;
+    return raw
+      .replace(/[\\/:*?"<>|\x00-\x1f]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 80) || null;
   }
 
   try {
@@ -33,20 +43,27 @@ export default async function handler(req, res) {
     const contentType = response.headers.get('content-type') || 'application/octet-stream';
     const contentLength = response.headers.get('content-length');
 
-    // Extract filename from URL or content-type
+    // Extract filename: 優先使用主題標題，否則退回 URL / 類型預設
     let filename = 'download';
-    if (contentType?.startsWith('video/')) filename = 'video.mp4';
-    else if (contentType?.startsWith('image/')) {
+    const fileTitle = safeName(title);
+    if (contentType?.startsWith('video/')) {
+      const ext = contentType.includes('mp4') ? 'mp4' : 'mp4';
+      filename = fileTitle ? `${fileTitle}.${ext}` : 'video.mp4';
+    } else if (contentType?.startsWith('image/')) {
       const ext = contentType.split('/').pop() || 'jpg';
-      filename = `image.${ext}`;
+      filename = fileTitle ? `${fileTitle}.${ext}` : `image.${ext}`;
+    } else if (fileTitle) {
+      filename = `${fileTitle}.mp4`;
     }
     if (targetUrl.match(/\/[^/]+\.[a-z0-9]+(?:\?|$)/i)) {
       const match = targetUrl.match(/\/([^/?]+)\.([a-z0-9]+)(?:\?|$)/i);
-      if (match) filename = `xiaohongshu_${match[1].slice(0, 20)}.${match[2]}`;
+      if (match && !fileTitle) filename = `xiaohongshu_${match[1].slice(0, 20)}.${match[2]}`;
     }
 
+    // RFC 5987 支援中文檔名（Content-Disposition filename*）
+    const asciiFallback = filename.replace(/[^\x20-\x7e]/g, '_').slice(0, 60);
     res.setHeader('Content-Type', contentType);
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
     if (contentLength) res.setHeader('Content-Length', contentLength);
     res.setHeader('Cache-Control', 'public, max-age=86400');
 

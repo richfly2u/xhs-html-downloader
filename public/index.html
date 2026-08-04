@@ -238,5 +238,14 @@
   </footer>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <!-- 底部固定下載列：解析完成後固定在畫面底部，免滾動 -->
+  <div class="sticky-dl is-hidden" id="stickyDownloadBar" role="region" aria-label="下載">
+    <div class="sticky-dl-title" id="stickyDlTitle">下載</div>
+    <button class="button button-primary sticky-dl-btn" id="stickyDownloadButton" type="button">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 20h14"/></svg>
+      <span id="stickyDownloadLabel">下載</span>
+    </button>
+  </div>
 </body>
 </html>

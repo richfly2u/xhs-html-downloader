@@ -76,6 +76,9 @@ function showToast(message) {
 function showError(message) {
   errorText.textContent = message;
   errorBox.classList.remove('is-hidden');
+  // 解析失敗時隱藏底部固定下載列
+  document.getElementById('stickyDownloadBar')?.classList.add('is-hidden');
+  document.body.classList.remove('has-sticky-dl');
 }
 
 function hideError() {
@@ -265,7 +268,7 @@ function iconDownload() {
 }
 
 
-function configureDownloadLink(link, url, directLabel) {
+function configureDownloadLink(link, url, directLabel, title) {
   link.href = url || '#';
   let isExternal = false;
   try {
@@ -275,9 +278,11 @@ function configureDownloadLink(link, url, directLabel) {
   }
 
   link.dataset.external = isExternal ? '1' : '0';
+  link.dataset.title = title || '';
   if (isExternal) {
     // 走 Vercel proxy (HTTPS) 避免 Chrome 阻擋不安全下載
-    const proxyUrl = '/api/download?url=' + encodeURIComponent(url);
+    let proxyUrl = '/api/download?url=' + encodeURIComponent(url);
+    if (title) proxyUrl += '&title=' + encodeURIComponent(title);
     link.dataset.proxyUrl = proxyUrl;
     if (link === downloadButton) downloadLabel.textContent = '下載';
   } else {
@@ -287,7 +292,7 @@ function configureDownloadLink(link, url, directLabel) {
   }
 }
 
-function renderImages(images) {
+function renderImages(images, fallbackTitle) {
   imageGrid.textContent = '';
   for (const image of images) {
     const item = document.createElement('div');
@@ -298,7 +303,7 @@ function renderImages(images) {
     img.loading = 'lazy';
     const link = document.createElement('a');
     link.className = 'image-download';
-    configureDownloadLink(link, image.downloadUrl || image.directUrl, '開啟圖片');
+    configureDownloadLink(link, image.downloadUrl || image.directUrl, '開啟圖片', fallbackTitle);
     link.setAttribute('aria-label', `下載圖片 ${image.index}`);
     link.innerHTML = iconDownload();
     item.append(img, link);
@@ -410,7 +415,7 @@ function renderResult(data) {
     }
     if (data.cover) videoPlayer.poster = data.cover;
     videoPlayer.classList.remove('is-hidden');
-    configureDownloadLink(downloadButton, data.video.downloadUrl || data.video.directUrl, '開啟影片下載');
+    configureDownloadLink(downloadButton, data.video.downloadUrl || data.video.directUrl, '開啟影片下載', data.title);
     // YouTube: POST blob download via /api/dl-proxy (no URL encoding issues)
     if (data.platform === 'youtube') {
       const ytDlUrl = data.sourceUrl;
@@ -433,10 +438,10 @@ function renderResult(data) {
     if (downloadButton.dataset.external !== '1') downloadLabel.textContent = '下載影片';
     copyLinkButton.dataset.url = data.video.directUrl;
   } else {
-    renderImages(data.images || []);
+    renderImages(data.images || [], data.title);
     imageGrid.classList.remove('is-hidden');
     const first = data.images?.[0];
-    configureDownloadLink(downloadButton, first?.downloadUrl || first?.directUrl || '#', '開啟圖片下載');
+    configureDownloadLink(downloadButton, first?.downloadUrl || first?.directUrl || '#', '開啟圖片下載', data.title);
     if (downloadButton.dataset.external !== '1') downloadLabel.textContent = data.images?.length > 1 ? '下載第一張' : '下載圖片';
     copyLinkButton.dataset.url = first?.directUrl || '';
   }
@@ -478,6 +483,17 @@ function renderResult(data) {
   }
 
   addHistory(data);
+  // 底部固定下載列：顯示並同步按鈕文字（點擊直接觸發主下載按鈕）
+  const stickyBar = document.getElementById('stickyDownloadBar');
+  const stickyLabel = document.getElementById('stickyDownloadLabel');
+  const stickyTitle = document.getElementById('stickyDlTitle');
+  if (stickyBar && stickyLabel) {
+    const dlText = downloadLabel.textContent;
+    stickyLabel.textContent = dlText;
+    stickyTitle.textContent = data.title || (isVideo ? '影片' : '圖片');
+    stickyBar.classList.remove('is-hidden');
+    document.body.classList.add('has-sticky-dl');
+  }
   resultSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
   // 不自動觸發 AI 分析（避免無意間消耗 Token），使用者可點「開始分析」
   analysisSection.classList.remove('is-hidden');
@@ -685,7 +701,10 @@ downloadButton.addEventListener('click', async (e) => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'download.mp4';
+      // 使用主題標題當檔名（後端已加 &title=），瀏覽器端再兜底
+      const title = downloadButton.dataset.title || '';
+      const ext = (blob.type.includes('mp4') || blob.type.includes('video')) ? 'mp4' : 'jpg';
+      a.download = title ? `${title.replace(/[\\/:*?"<>|\x00-\x1f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) || 'download'}.${ext}` : `download.${ext}`;
       a.style.display = 'none';
       document.body.appendChild(a);
       a.click();
@@ -700,6 +719,11 @@ downloadButton.addEventListener('click', async (e) => {
 });
 
 parseButton.addEventListener('click', parseCurrentInput);
+// 底部固定下載列：點擊觸發主下載按鈕（共用全部下載邏輯）
+document.getElementById('stickyDownloadButton')?.addEventListener('click', (e) => {
+  e.preventDefault();
+  downloadButton.click();
+});
 input.addEventListener('input', updateCounter);
 input.addEventListener('keydown', (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') parseCurrentInput();
