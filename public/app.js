@@ -696,7 +696,16 @@ downloadButton.addEventListener('click', async (e) => {
     downloadLabel.textContent = '下載中…';
     try {
       const response = await fetch(proxyUrl);
-      if (!response.ok) throw new Error('伺服器回應錯誤');
+      if (!response.ok) {
+        // 嘗試讀取後端錯誤訊息，給明確原因
+        let msg = '伺服器回應錯誤';
+        try {
+          const err = await response.json();
+          if (err?.error) msg = err.error;
+        } catch {}
+        showDownloadError(msg, response.status);
+        return;
+      }
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -712,11 +721,38 @@ downloadButton.addEventListener('click', async (e) => {
       URL.revokeObjectURL(url);
       showToast('下載完成');
     } catch (err) {
-      showToast('下載失敗');
+      showDownloadError('下載失敗：' + (err?.message || '網路錯誤'), 0);
     }
     downloadLabel.textContent = '下載';
+  } else {
+    // 同源 URL：直接開啟下載（<a download> 或開新分頁）
+    e.preventDefault();
+    const url = downloadButton.href || downloadButton.dataset.url;
+    if (!url || url === '#') { showToast('沒有可下載的內容'); return; }
+    const title = downloadButton.dataset.title || 'download';
+    const safe = title.replace(/[\\/:*?"<>|\x00-\x1f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) || 'download';
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = safe;
+    a.rel = 'noopener';
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
   }
 });
+
+// 下載失敗：錯誤訊息顯示在結果區並停留較久
+function showDownloadError(msg, status) {
+  const detail = status ? `（HTTP ${status}）` : '';
+  const errorBox = document.getElementById('errorBox');
+  const errorText = document.getElementById('errorText');
+  if (errorBox && errorText) {
+    errorBox.classList.remove('is-hidden');
+    errorText.textContent = `下載失敗${detail}：${msg}。來源可能已過期或禁止直接存取，請重新解析一次再試。`;
+  }
+  showToast('下載失敗');
+}
 
 parseButton.addEventListener('click', parseCurrentInput);
 // 底部固定下載列：點擊觸發主下載按鈕（共用全部下載邏輯）

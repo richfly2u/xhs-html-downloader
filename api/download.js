@@ -37,7 +37,10 @@ export default async function handler(req, res) {
     });
 
     if (!response.ok) {
-      return res.status(response.status).json({ error: `遠端伺服器錯誤 (${response.status})` });
+      let msg = `遠端伺服器錯誤 (${response.status})`;
+      if (response.status === 403) msg = '來源拒絕存取（媒體連結可能已過期或禁止外部下載，請重新解析）';
+      if (response.status === 404) msg = '來源已不存在（媒體可能被刪除或連結失效）';
+      return res.status(response.status).json({ error: msg });
     }
 
     const contentType = response.headers.get('content-type') || 'application/octet-stream';
