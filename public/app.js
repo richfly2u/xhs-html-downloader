@@ -707,13 +707,15 @@ downloadButton.addEventListener('click', async (e) => {
         return;
       }
       const blob = await response.blob();
+      // 副檔名以後端 header 為準（blob.type 常為 octet-stream 不可靠）
+      const serverExt = response.headers.get('X-Download-Ext') || '';
+      const title = downloadButton.dataset.title || '';
+      const ext = serverExt || (blob.type.includes('video') ? 'mp4' : 'jpg');
+      const safeTitle = title.replace(/[\\/:*?"<>|\x00-\x1f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) || 'download';
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      // 使用主題標題當檔名（後端已加 &title=），瀏覽器端再兜底
-      const title = downloadButton.dataset.title || '';
-      const ext = (blob.type.includes('mp4') || blob.type.includes('video')) ? 'mp4' : 'jpg';
-      a.download = title ? `${title.replace(/[\\/:*?"<>|\x00-\x1f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) || 'download'}.${ext}` : `download.${ext}`;
+      a.download = `${safeTitle}.${ext}`;
       a.style.display = 'none';
       document.body.appendChild(a);
       a.click();

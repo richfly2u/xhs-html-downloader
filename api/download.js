@@ -48,15 +48,19 @@ export default async function handler(req, res) {
 
     // Extract filename: 優先使用主題標題，否則退回 URL / 類型預設
     let filename = 'download';
+    let ext = 'mp4';
     const fileTitle = safeName(title);
     if (contentType?.startsWith('video/')) {
-      const ext = contentType.includes('mp4') ? 'mp4' : 'mp4';
+      ext = 'mp4';
       filename = fileTitle ? `${fileTitle}.${ext}` : 'video.mp4';
     } else if (contentType?.startsWith('image/')) {
-      const ext = contentType.split('/').pop() || 'jpg';
+      ext = contentType.split('/').pop() || 'jpg';
       filename = fileTitle ? `${fileTitle}.${ext}` : `image.${ext}`;
     } else if (fileTitle) {
-      filename = `${fileTitle}.mp4`;
+      // octet-stream 等未知類型：優先依 URL 副檔名判斷
+      const m = targetUrl.match(/\.(mp4|jpg|jpeg|png|webp|gif|mov)(?:\?|$)/i);
+      ext = m ? m[1].toLowerCase() : 'mp4';
+      filename = `${fileTitle}.${ext}`;
     }
     if (targetUrl.match(/\/[^/]+\.[a-z0-9]+(?:\?|$)/i)) {
       const match = targetUrl.match(/\/([^/?]+)\.([a-z0-9]+)(?:\?|$)/i);
@@ -67,6 +71,8 @@ export default async function handler(req, res) {
     const asciiFallback = filename.replace(/[^\x20-\x7e]/g, '_').slice(0, 60);
     res.setHeader('Content-Type', contentType);
     res.setHeader('Content-Disposition', `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
+    // 自訂 header：讓前端知道真實副檔名（blob.type 常為 octet-stream 不可靠）
+    res.setHeader('X-Download-Ext', ext);
     if (contentLength) res.setHeader('Content-Length', contentLength);
     res.setHeader('Cache-Control', 'public, max-age=86400');
 
