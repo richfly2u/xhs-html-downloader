@@ -17,7 +17,12 @@ export default async function handler(req, res) {
   // 檔名安全化：移除 Windows/Unix 非法字元、控制字元，限制長度
   function safeName(raw) {
     if (!raw || typeof raw !== 'string') return null;
-    return raw
+    // FB 標題帶 HTML entity（&#xa0; 等）→ 先解碼成實際字元
+    const decoded = raw
+      .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+      .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10)))
+      .replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+    return decoded
       .replace(/[\\/:*?"<>|\x00-\x1f]/g, ' ')
       .replace(/\s+/g, ' ')
       .trim()
@@ -28,10 +33,15 @@ export default async function handler(req, res) {
     const targetUrl = decodeURIComponent(url);
     new URL(targetUrl); // validate URL
 
+    // FB 的 CDN（fbcdn.net）對一般瀏覽器 UA 會回非預期內容（音訊流/403）；
+    // 用 facebookexternalhit/1.1 才能拿到完整影片（與解析端一致）
+    const isFbCdn = /fbcdn\.net/i.test(targetUrl);
     const response = await fetch(targetUrl, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/134.0 Safari/537.36',
-        Referer: 'https://www.xiaohongshu.com/',
+        'User-Agent': isFbCdn
+          ? 'facebookexternalhit/1.1'
+          : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/134.0 Safari/537.36',
+        Referer: isFbCdn ? 'https://www.facebook.com/' : 'https://www.xiaohongshu.com/',
       },
       redirect: 'follow',
     });
