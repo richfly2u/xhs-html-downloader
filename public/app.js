@@ -284,6 +284,7 @@ function configureDownloadLink(link, url, directLabel, title) {
     let proxyUrl = '/api/download?url=' + encodeURIComponent(url);
     if (title) proxyUrl += '&title=' + encodeURIComponent(title);
     link.dataset.proxyUrl = proxyUrl;
+    link.dataset.title = title || '';
     if (link === downloadButton) downloadLabel.textContent = '下載';
   } else {
     link.removeAttribute('target');
@@ -291,6 +292,37 @@ function configureDownloadLink(link, url, directLabel, title) {
     link.setAttribute('download', '');
   }
 }
+
+// 外部媒體一律用 blob 下載（不依賴 Content-Disposition — 手機瀏覽器常忽略 filename* 導致亂碼檔名）
+document.addEventListener('click', async (e) => {
+  const link = e.target.closest('a[data-proxy-url]');
+  if (!link) return;
+  e.preventDefault();
+  const proxyUrl = link.dataset.proxyUrl;
+  const title = link.dataset.title || 'download';
+  const label = (link === downloadButton) ? downloadLabel : null;
+  if (label) label.textContent = '下載中…';
+  try {
+    const resp = await fetch(proxyUrl);
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const blob = await resp.blob();
+    const ext = resp.headers.get('X-Download-Ext') || 'mp4';
+    const safeName = (title + '.' + ext)
+      .replace(/[\\/:*?"<>|\x00-\x1f]/g, ' ')
+      .replace(/\s+/g, ' ').trim().slice(0, 80) || ('download.' + ext);
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = safeName;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 5000);
+  } catch (err) {
+    console.error('Blob 下載失敗，改開代理 URL', err);
+    window.open(proxyUrl, '_blank');
+  } finally {
+    if (label) label.textContent = '下載';
+  }
+});
 
 function renderImages(images, fallbackTitle) {
   imageGrid.textContent = '';
