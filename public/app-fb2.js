@@ -1,0 +1,863 @@
+const $ = (id) => document.getElementById(id);
+const input = $('shareInput');
+const parseButton = $('parseButton');
+const pasteButton = $('pasteButton');
+const clearButton = $('clearButton');
+const errorBox = $('errorBox');
+const errorText = $('errorText');
+const resultSection = $('resultSection');
+const videoPlayer = $('videoPlayer');
+const imageGrid = $('imageGrid');
+const mediaPlaceholder = $('mediaPlaceholder');
+const downloadButton = $('downloadButton');
+const downloadLabel = $('downloadLabel');
+const copyLinkButton = $('copyLinkButton');
+const copyTextButton = $('copyTextButton');
+const mediaPanel = $('mediaPanel');
+const historySection = $('historySection');
+const historyList = $('historyList');
+const formatPicker = $('formatPicker') || { classList: { add() {}, remove() {} } };
+const formatList = $('formatList');
+const coverDownloadButton = $('coverDownloadButton');
+const retryAnalysisButton = $('retryAnalysisButton');
+const themeButton = $('themeButton');
+const analysisSection = $('analysisSection');
+const analysisLoading = $('analysisLoading');
+const analysisError = $('analysisError');
+const analysisErrorText = $('analysisErrorText');
+const analysisContent = $('analysisContent');
+const analysisStatus = $('analysisStatus');
+const analysisWarning = $('analysisWarning');
+const transcriptBox = $('transcriptBox');
+const aiAccessCodeInput = $('aiAccessCodeInput');
+const saveAiAccessCodeButton = $('saveAiAccessCodeButton');
+const clearAiAccessCodeButton = $('clearAiAccessCodeButton');
+const aiAccessCodeStatus = $('aiAccessCodeStatus');
+let analysisResult = null;
+let analysisRequestId = 0;
+const HISTORY_KEY = 'xhs-html-downloader-history-v1';
+const AI_ACCESS_CODE_KEY = 'xhs-html-downloader-ai-access-code';
+let result = null;
+let resultData = null; // raw data from API
+let toastTimer = null;
+
+
+function getAiAccessCode() {
+  return localStorage.getItem(AI_ACCESS_CODE_KEY) || '';
+}
+
+function setAiAccessCode(value) {
+  const clean = String(value || '').trim();
+  if (clean) localStorage.setItem(AI_ACCESS_CODE_KEY, clean);
+  else localStorage.removeItem(AI_ACCESS_CODE_KEY);
+  syncAiAccessUI();
+}
+
+function syncAiAccessUI(message = '') {
+  const hasCode = Boolean(getAiAccessCode());
+  if (aiAccessCodeInput) aiAccessCodeInput.value = hasCode ? getAiAccessCode() : '';
+  if (aiAccessCodeStatus) {
+    aiAccessCodeStatus.textContent = message || (hasCode
+      ? '已儲存 AI 功能密碼。之後按「重新分析」或解析新內容時，會自動附帶密碼。'
+      : '尚未儲存 AI 密碼。公開網址可供任何人使用一般解析功能，建議保護 AI 功能以避免消耗您的 Token。');
+    aiAccessCodeStatus.classList.toggle('is-ok', hasCode && !message);
+    aiAccessCodeStatus.classList.toggle('is-warn', !hasCode || Boolean(message));
+  }
+}
+
+function showToast(message) {
+  const toast = $('toast');
+  toast.textContent = message;
+  toast.classList.add('is-visible');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.classList.remove('is-visible'), 2100);
+}
+
+function showError(message) {
+  errorText.textContent = message;
+  errorBox.classList.remove('is-hidden');
+  // 解析失敗時隱藏底部固定下載列
+  document.getElementById('stickyDownloadBar')?.classList.add('is-hidden');
+  document.body.classList.remove('has-sticky-dl');
+}
+
+function hideError() {
+  errorBox.classList.add('is-hidden');
+  errorText.textContent = '';
+}
+
+function setLoading(loading) {
+  parseButton.disabled = loading;
+  pasteButton.disabled = loading;
+  parseButton.classList.toggle('is-loading', loading);
+}
+
+async function copyText(value, successMessage) {
+  if (!value) return;
+  try {
+    await navigator.clipboard.writeText(value);
+    showToast(successMessage);
+  } catch {
+    const helper = document.createElement('textarea');
+    helper.value = value;
+    helper.style.position = 'fixed';
+    helper.style.opacity = '0';
+    document.body.appendChild(helper);
+    helper.select();
+    document.execCommand('copy');
+    helper.remove();
+    showToast(successMessage);
+  }
+}
+
+
+function analysisModeName(mode) {
+  const names = {
+    'ai-video': 'Groq AI 影片逐字稿＋優化文案',
+    'ai-caption': 'Groq AI 文案優化',
+    'local-caption': '內建文案分析'
+  };
+  return names[mode] || '自動文案分析';
+}
+
+function resetAnalysisUI() {
+  analysisResult = null;
+  analysisSection.classList.remove('is-hidden');
+  analysisLoading.classList.remove('is-hidden');
+  analysisError.classList.add('is-hidden');
+  analysisContent.classList.add('is-hidden');
+  analysisStatus.classList.remove('is-done');
+  analysisStatus.lastChild.textContent = '分析中';
+  analysisWarning.classList.add('is-hidden');
+  transcriptBox.classList.add('is-hidden');
+}
+
+function renderList(id, items) {
+  const list = $(id);
+  list.textContent = '';
+  for (const value of items || []) {
+    const li = document.createElement('li');
+    li.textContent = value;
+    list.appendChild(li);
+  }
+}
+
+function renderAnalysis(data) {
+  analysisResult = data;
+  analysisLoading.classList.add('is-hidden');
+  analysisError.classList.add('is-hidden');
+  analysisContent.classList.remove('is-hidden');
+  analysisStatus.classList.add('is-done');
+  analysisStatus.lastChild.textContent = '已完成';
+  retryAnalysisButton.textContent = '重新分析';
+
+  $('analysisMode').textContent = analysisModeName(data.mode);
+  $('analysisSummary').textContent = data.summary || '分析完成';
+  $('analysisHook').textContent = data.hook || '—';
+  $('analysisAudience').textContent = data.audience || '—';
+  $('analysisStructure').textContent = data.structure || '—';
+  renderList('analysisStrengths', data.strengths);
+  renderList('analysisImprovements', data.improvements);
+
+  const keywords = $('analysisKeywords');
+  keywords.textContent = '';
+  for (const value of data.keywords || []) {
+    const tag = document.createElement('span');
+    tag.textContent = `#${String(value).replace(/^#/, '')}`;
+    keywords.appendChild(tag);
+  }
+  keywords.classList.toggle('is-hidden', !data.keywords?.length);
+  $('optimizedCopy').textContent = data.optimizedCopy || '';
+
+  if (data.warning) {
+    analysisWarning.textContent = data.warning;
+    analysisWarning.classList.remove('is-hidden');
+  } else {
+    analysisWarning.classList.add('is-hidden');
+  }
+
+  if (data.transcript || data.transcriptionStatus) {
+    $('transcriptionStatus').textContent = data.transcriptionStatus || '';
+    $('transcriptText').textContent = data.transcript || '沒有取得逐字稿。';
+    transcriptBox.classList.remove('is-hidden');
+  } else {
+    transcriptBox.classList.add('is-hidden');
+  }
+}
+
+function showAnalysisError(message) {
+  analysisLoading.classList.add('is-hidden');
+  analysisContent.classList.add('is-hidden');
+  analysisError.classList.remove('is-hidden');
+  analysisErrorText.textContent = message;
+  analysisStatus.classList.remove('is-done');
+  analysisStatus.lastChild.textContent = '未完成';
+}
+
+async function analyzeCurrentResult(data = result) {
+  if (!data) return;
+  const requestId = ++analysisRequestId;
+  resetAnalysisUI();
+  try {
+    const aiAccessCode = getAiAccessCode();
+    const headers = { 'content-type': 'application/json' };
+    if (aiAccessCode) headers['x-ai-access-code'] = aiAccessCode;
+    const response = await fetch('/api/analyze', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        title: data.title || '',
+        description: data.description || '',
+        author: data.author || '',
+        sourceUrl: data.sourceUrl || '',
+        videoUrl: data.video?.directUrl || data.videoUrl || ''
+      })
+    });
+    const payload = await response.json().catch(() => null);
+    if (requestId !== analysisRequestId) return;
+    if (!response.ok || !payload?.success) {
+      if (response.status === 401) {
+        syncAiAccessUI('此網站已啟用 AI 密碼保護，請先輸入正確密碼後再重新分析。');
+      } else if (response.status === 403) {
+        syncAiAccessUI('AI 密碼不正確，請重新輸入後再試一次。');
+      }
+      throw new Error(payload?.error || `文案分析服務錯誤：HTTP ${response.status}`);
+    }
+    if (aiAccessCode) syncAiAccessUI();
+    renderAnalysis(payload.data);
+  } catch (error) {
+    if (requestId !== analysisRequestId) return;
+    showAnalysisError(error.message || '文案分析失敗，請稍後再試。');
+  }
+}
+
+function analysisAsText(data) {
+  if (!data) return '';
+  const lines = [
+    `核心摘要：${data.summary || ''}`,
+    `吸睛開頭：${data.hook || ''}`,
+    `目標觀眾：${data.audience || ''}`,
+    `文案結構：${data.structure || ''}`,
+    '',
+    '文案優點：',
+    ...(data.strengths || []).map((item) => `• ${item}`),
+    '',
+    '可改善之處：',
+    ...(data.improvements || []).map((item) => `• ${item}`),
+    '',
+    `關鍵字：${(data.keywords || []).map((item) => `#${String(item).replace(/^#/, '')}`).join(' ')}`,
+    '',
+    '優化後文案：',
+    data.optimizedCopy || ''
+  ];
+  if (data.transcript) lines.push('', '影片逐字稿：', data.transcript);
+  return lines.join('\n');
+}
+
+function parserName(value) {
+  const names = {
+    'initial-state': '結構資料',
+    'page-media-scan': '頁面掃描',
+    'direct-media-url': '媒體直連'
+  };
+  return names[value] || value || '';
+}
+
+function iconDownload() {
+  return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 20h14"/></svg>';
+}
+
+
+function configureDownloadLink(link, url, directLabel, title) {
+  link.href = url || '#';
+  let isExternal = false;
+  try {
+    isExternal = Boolean(url) && new URL(url, window.location.href).origin !== window.location.origin;
+  } catch {
+    isExternal = false;
+  }
+
+  link.dataset.external = isExternal ? '1' : '0';
+  link.dataset.title = title || '';
+  if (isExternal) {
+    // 走 Vercel proxy (HTTPS) 避免 Chrome 阻擋不安全下載
+    let proxyUrl = '/api/download?url=' + encodeURIComponent(url);
+    if (title) proxyUrl += '&title=' + encodeURIComponent(title);
+    link.dataset.proxyUrl = proxyUrl;
+    link.dataset.title = title || '';
+    if (link === downloadButton) downloadLabel.textContent = '下載';
+  } else {
+    link.removeAttribute('target');
+    link.removeAttribute('rel');
+    link.setAttribute('download', '');
+  }
+}
+
+// 外部媒體：直接導向 /api/download 代理（瀏覽器原生下載 — Chromium 全系列支援
+// Content-Disposition filename* UTF-8 中文檔名；blob + a.download 在部分手機瀏覽器
+// 會被忽略導致亂碼，故不用 blob）
+document.addEventListener('click', (e) => {
+  const link = e.target.closest('a[data-proxy-url]');
+  if (!link) return;
+  e.preventDefault();
+  const proxyUrl = link.dataset.proxyUrl;
+  const label = (link === downloadButton) ? downloadLabel : null;
+  if (label) label.textContent = '下載中…';
+  window.open(proxyUrl, '_blank');
+  setTimeout(() => { if (label) label.textContent = '下載'; }, 1500);
+});
+
+function renderImages(images, fallbackTitle) {
+  imageGrid.textContent = '';
+  for (const image of images) {
+    const item = document.createElement('div');
+    item.className = 'image-item';
+    const img = document.createElement('img');
+    img.src = image.previewUrl || image.directUrl;
+    img.alt = `圖片 ${image.index}`;
+    img.loading = 'lazy';
+    const link = document.createElement('a');
+    link.className = 'image-download';
+    configureDownloadLink(link, image.downloadUrl || image.directUrl, '開啟圖片', fallbackTitle);
+    link.setAttribute('aria-label', `下載圖片 ${image.index}`);
+    link.innerHTML = iconDownload();
+    item.append(img, link);
+    imageGrid.appendChild(item);
+  }
+}
+
+function renderResult(data) {
+  result = data;
+  resultData = data; // store raw data for format picker
+  hideError();
+  resultSection.classList.remove('is-hidden');
+  mediaPlaceholder.classList.add('is-hidden');
+  videoPlayer.classList.add('is-hidden');
+  imageGrid.classList.add('is-hidden');
+  formatPicker.classList.add('is-hidden');
+  videoPlayer.removeAttribute('src');
+  videoPlayer.load();
+
+  const isVideo = Boolean(data.video);
+  // Build format picker for YouTube
+  if (data.platform === 'youtube' && (data.videoFormats?.length > 0 || data.audioFormats?.length > 0)) {
+    // Create or find format picker container
+    let formatContainer = document.getElementById('ytFormatPicker');
+    if (!formatContainer) {
+      formatContainer = document.createElement('div');
+      formatContainer.id = 'ytFormatPicker';
+      formatContainer.className = 'yt-format-picker';
+      // Insert after video player or result section
+      const insertAfter = videoPlayer.parentElement || resultSection;
+      insertAfter.parentElement.insertBefore(formatContainer, insertAfter.nextSibling);
+    }
+    formatContainer.textContent = '';
+    const title = document.createElement('div');
+    title.className = 'yt-section-title';
+    title.textContent = '選擇格式下載';
+    formatContainer.appendChild(title);
+
+    // Helper: create format row
+    function createRow(fmt) {
+      const row = document.createElement('div');
+      row.className = 'yt-format-row';
+      const info = document.createElement('div');
+      info.className = 'yt-format-info';
+      const label = document.createElement('span');
+      label.className = 'yt-format-label';
+      label.textContent = fmt.hasVideo ? (fmt.label || `${fmt.height}p`) : (fmt.label || `${fmt.abr}k`);
+      info.appendChild(label);
+      if (fmt.size) {
+        const sz = document.createElement('span');
+        sz.className = 'yt-format-size';
+        sz.textContent = fmt.size;
+        info.appendChild(sz);
+      }
+      row.appendChild(info);
+      const btn = document.createElement('a');
+      btn.className = 'yt-format-dl';
+      btn.textContent = '下載';
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        window.open('http://108.61.163.87:8799/api/dl?url=' + encodeURIComponent(data.sourceUrl || input.value.trim()) + '&title=' + encodeURIComponent(data.title || 'youtube'), '_blank');
+      });
+      row.appendChild(btn);
+      return row;
+    }
+
+    // Audio section
+    const aFmts = data.audioFormats || [];
+    if (aFmts.length > 0) {
+      const sec = document.createElement('div');
+      sec.className = 'yt-section';
+      const st = document.createElement('div');
+      st.className = 'yt-sub-title';
+      st.textContent = '🎵 音訊';
+      sec.appendChild(st);
+      aFmts.forEach(f => sec.appendChild(createRow(f)));
+      formatContainer.appendChild(sec);
+    }
+
+    // Video section
+    const vFmts = data.videoFormats || [];
+    if (vFmts.length > 0) {
+      const sec = document.createElement('div');
+      sec.className = 'yt-section';
+      const st = document.createElement('div');
+      st.className = 'yt-sub-title';
+      st.textContent = '🎬 影片';
+      sec.appendChild(st);
+      vFmts.forEach(f => sec.appendChild(createRow(f)));
+      formatContainer.appendChild(sec);
+    }
+
+    $('countValue').textContent = `${aFmts.length + vFmts.length} 種格式`;
+  }
+
+  if (isVideo) {
+    // YouTube CDN URLs don't play in browser - show poster only
+    if (data.platform === 'youtube') {
+      videoPlayer.removeAttribute('src');
+      videoPlayer.load();
+      // Show a message overlay on the video element
+      const msg = document.createElement('div');
+      msg.className = 'yt-overlay-msg';
+      msg.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7L8 5Z"/></svg> 點下方按鈕下載影片';
+      mediaPanel.querySelector('.yt-overlay-msg')?.remove();
+      mediaPanel.appendChild(msg);
+    } else {
+      videoPlayer.src = data.video.previewUrl || data.video.directUrl;
+    }
+    if (data.cover) videoPlayer.poster = data.cover;
+    videoPlayer.classList.remove('is-hidden');
+    configureDownloadLink(downloadButton, data.video.downloadUrl || data.video.directUrl, '開啟影片下載', data.title);
+    // YouTube: POST blob download via /api/dl-proxy (no URL encoding issues)
+    if (data.platform === 'youtube') {
+      const ytDlUrl = data.sourceUrl;
+      downloadButton.href = '#';
+      downloadButton.target = '';
+      downloadButton.rel = '';
+      downloadButton.removeAttribute('download');
+      downloadButton.dataset.external = '0';
+      downloadLabel.textContent = '下載影片';
+      copyLinkButton.dataset.url = ytDlUrl;
+      downloadButton.onclick = (e) => {
+        e.preventDefault();
+        downloadLabel.textContent = '準備下載…';
+        window.open('http://108.61.163.87:8799/api/dl?url=' + encodeURIComponent(ytDlUrl) + '&title=' + encodeURIComponent(data.title || 'youtube'), '_blank');
+        setTimeout(() => { downloadLabel.textContent = '下載影片'; }, 2000);
+      };
+    } else {
+      downloadButton.onclick = null;
+    }
+    if (downloadButton.dataset.external !== '1') downloadLabel.textContent = '下載影片';
+    copyLinkButton.dataset.url = data.video.directUrl;
+  } else {
+    renderImages(data.images || [], data.title);
+    imageGrid.classList.remove('is-hidden');
+    const first = data.images?.[0];
+    configureDownloadLink(downloadButton, first?.downloadUrl || first?.directUrl || '#', '開啟圖片下載', data.title);
+    if (downloadButton.dataset.external !== '1') downloadLabel.textContent = data.images?.length > 1 ? '下載第一張' : '下載圖片';
+    copyLinkButton.dataset.url = first?.directUrl || '';
+  }
+
+  // 縮圖下載按鈕 (vd6s-style thumbnail download)
+  $('coverDownloadButton')?.classList.toggle('is-hidden', !data.cover);
+  $('coverDownloadButton') && ($('coverDownloadButton').dataset.url = data.cover || '');
+
+  $('mediaType').textContent = isVideo ? '影片' : '圖片筆記';
+  $('parserLabel').textContent = parserName(data.parser);
+  const platformLabel = $('platformLabel');
+  if (platformLabel) {
+    platformLabel.textContent = data.platform || '';
+    platformLabel.classList.toggle('is-hidden', !data.platform);
+  }
+  $('resultTitle').textContent = data.title || '未命名作品';
+  $('formatValue').textContent = data.format || (isVideo ? 'MP4' : '圖片');
+  $('sizeValue').textContent = data.size || '未提供';
+  if (!(data.platform === 'youtube' && data.formats?.length)) {
+    $('countValue').textContent = isVideo ? `1 部影片${data.alternatives?.length ? ` · ${data.alternatives.length} 個備選` : ''}` : `${data.images?.length || 0} 張圖片`;
+  }
+
+  const authorLine = $('authorLine');
+  if (data.author) {
+    authorLine.textContent = `作者：${data.author}`;
+    authorLine.classList.remove('is-hidden');
+  } else {
+    authorLine.classList.add('is-hidden');
+  }
+
+  const description = $('resultDescription');
+  if (data.description) {
+    description.textContent = data.description;
+    description.classList.remove('is-hidden');
+    copyTextButton.classList.remove('is-hidden');
+  } else {
+    description.classList.add('is-hidden');
+    copyTextButton.classList.add('is-hidden');
+  }
+
+  addHistory(data);
+  // 底部固定下載列：顯示並同步按鈕文字（點擊直接觸發主下載按鈕）
+  const stickyBar = document.getElementById('stickyDownloadBar');
+  const stickyLabel = document.getElementById('stickyDownloadLabel');
+  const stickyTitle = document.getElementById('stickyDlTitle');
+  if (stickyBar && stickyLabel) {
+    const dlText = downloadLabel.textContent;
+    stickyLabel.textContent = dlText;
+    stickyTitle.textContent = data.title || (isVideo ? '影片' : '圖片');
+    stickyBar.classList.remove('is-hidden');
+    document.body.classList.add('has-sticky-dl');
+  }
+  resultSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  // 不自動觸發 AI 分析（避免無意間消耗 Token），使用者可點「開始分析」
+  analysisSection.classList.remove('is-hidden');
+  analysisLoading.classList.add('is-hidden');
+  analysisContent.classList.add('is-hidden');
+  analysisError.classList.remove('is-hidden');
+  analysisErrorText.textContent = '點擊下方按鈕開始文案分析（無 AI 金鑰時使用內建分析，不會消耗 Token）。';
+  analysisStatus.lastChild.textContent = '待分析';
+  analysisStatus.classList.remove('is-done');
+  retryAnalysisButton.textContent = '開始分析';
+}
+
+function isYouTubeLink(text) {
+  return /(?:youtube\.com|youtu\.be)/i.test(text);
+}
+
+async function parseCurrentInput() {
+  const value = input.value.trim();
+  if (!value) {
+    showError('請先貼上小紅書分享文字或連結。');
+    input.focus();
+    return;
+  }
+
+  hideError();
+  setLoading(true);
+  try {
+    const isYT = isYouTubeLink(value);
+    const endpoint = '/api/parse';
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url: value })
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload?.success) {
+      throw new Error(payload?.error || `伺服器回應錯誤：HTTP ${response.status}`);
+    }
+    renderResult(payload.data);
+  } catch (error) {
+    showError(error.message || '解析失敗，請稍後再試。');
+  } finally {
+    setLoading(false);
+  }
+}
+
+function readHistory() {
+  try {
+    const value = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+    return Array.isArray(value) ? value : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveHistory(items) {
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(items.slice(0, 30)));
+  renderHistory();
+syncAiAccessUI();
+}
+
+function addHistory(data) {
+  if (!data.sourceUrl) return;
+  const items = readHistory().filter((item) => item.sourceUrl !== data.sourceUrl);
+  items.unshift({
+    sourceUrl: data.sourceUrl,
+    title: data.title || '未命名作品',
+    cover: data.cover || data.images?.[0]?.directUrl || data.images?.[0]?.previewUrl || '',
+    mediaUrl: data.video?.directUrl || data.images?.[0]?.directUrl || '',
+    type: data.type,
+    time: Date.now()
+  });
+  saveHistory(items);
+}
+
+function relativeTime(timestamp) {
+  const minutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60000));
+  if (minutes < 1) return '剛剛';
+  if (minutes < 60) return `${minutes} 分鐘前`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} 小時前`;
+  return `${Math.floor(hours / 24)} 天前`;
+}
+
+function historyPlaceholder(thumb, type) {
+  thumb.textContent = '';
+  thumb.innerHTML = type === 'video'
+    ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7L8 5Z"/></svg>'
+    : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4V5Zm3 10 3-3 3 3 2-2 3 3M9 9h.01"/></svg>';
+}
+
+function thumbnailProxyUrl(url) {
+  if (!url) return '';
+  try {
+    const parsed = new URL(url, window.location.href);
+    if (parsed.origin === window.location.origin) return parsed.toString();
+    if (!parsed.hostname.endsWith('.xhscdn.com') && parsed.hostname !== 'xhscdn.com') return url;
+    return `/api/thumbnail?url=${encodeURIComponent(parsed.toString())}`;
+  } catch {
+    return url;
+  }
+}
+
+function renderHistoryThumbnail(thumb, item) {
+  const rawCandidates = [...new Set([item.cover, item.type !== 'video' ? item.mediaUrl : ''].filter(Boolean))];
+  const candidates = [];
+  for (const url of rawCandidates) {
+    const proxied = thumbnailProxyUrl(url);
+    if (proxied) candidates.push(proxied);
+    if (url !== proxied) candidates.push(url);
+  }
+
+  if (candidates.length) {
+    const img = document.createElement('img');
+    img.alt = '';
+    img.loading = 'lazy';
+    img.decoding = 'async';
+    img.referrerPolicy = 'no-referrer';
+    let index = 0;
+    const loadNext = () => {
+      if (index >= candidates.length) {
+        historyPlaceholder(thumb, item.type);
+        return;
+      }
+      img.src = candidates[index++];
+    };
+    img.addEventListener('error', loadNext);
+    thumb.appendChild(img);
+    loadNext();
+    return;
+  }
+
+  if (item.type === 'video' && item.mediaUrl) {
+    const video = document.createElement('video');
+    video.src = item.mediaUrl;
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = 'metadata';
+    video.setAttribute('aria-hidden', 'true');
+    video.addEventListener('loadedmetadata', () => {
+      try { video.currentTime = Math.min(0.1, Number.isFinite(video.duration) ? video.duration / 10 : 0.1); } catch {}
+    }, { once: true });
+    video.addEventListener('error', () => historyPlaceholder(thumb, item.type), { once: true });
+    thumb.appendChild(video);
+    return;
+  }
+
+  historyPlaceholder(thumb, item.type);
+}
+
+function renderHistory() {
+  const items = readHistory();
+  historyList.textContent = '';
+  historySection.classList.toggle('is-hidden', items.length === 0);
+  for (const item of items) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'history-item';
+
+    const thumb = document.createElement('span');
+    thumb.className = 'history-thumb';
+    renderHistoryThumbnail(thumb, item);
+
+    const info = document.createElement('span');
+    info.className = 'history-info';
+    const title = document.createElement('strong');
+    title.textContent = item.title;
+    const detail = document.createElement('span');
+    detail.textContent = `${item.type === 'video' ? '影片' : '圖片'} · ${relativeTime(item.time)}`;
+    info.append(title, detail);
+
+    const arrow = document.createElement('span');
+    arrow.className = 'history-arrow';
+    arrow.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>';
+    button.append(thumb, info, arrow);
+    button.addEventListener('click', () => {
+      input.value = item.sourceUrl;
+      updateCounter();
+      parseCurrentInput();
+    });
+    historyList.appendChild(button);
+  }
+}
+
+function updateCounter() {
+  $('charCount').textContent = `${input.value.length} / 4096`;
+}
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  localStorage.setItem('xhs-theme', theme);
+  themeButton.setAttribute('aria-label', theme === 'dark' ? '切換淺色模式' : '切換深色模式');
+}
+
+downloadButton.addEventListener('click', async (e) => {
+  if (downloadButton.dataset.external === '1') {
+    e.preventDefault();
+    const proxyUrl = downloadButton.dataset.proxyUrl;
+    if (!proxyUrl) { showToast('無法取得下載連結'); return; }
+    downloadLabel.textContent = '下載中…';
+    try {
+      const response = await fetch(proxyUrl);
+      if (!response.ok) {
+        // 嘗試讀取後端錯誤訊息，給明確原因
+        let msg = '伺服器回應錯誤';
+        try {
+          const err = await response.json();
+          if (err?.error) msg = err.error;
+        } catch {}
+        showDownloadError(msg, response.status);
+        return;
+      }
+      const blob = await response.blob();
+      // 副檔名以後端 header 為準（blob.type 常為 octet-stream 不可靠）
+      const serverExt = response.headers.get('X-Download-Ext') || '';
+      const title = downloadButton.dataset.title || '';
+      const ext = serverExt || (blob.type.includes('video') ? 'mp4' : 'jpg');
+      const safeTitle = title.replace(/[\\/:*?"<>|\x00-\x1f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) || 'download';
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${safeTitle}.${ext}`;
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      showToast('下載完成');
+    } catch (err) {
+      showDownloadError('下載失敗：' + (err?.message || '網路錯誤'), 0);
+    }
+    downloadLabel.textContent = '下載';
+  } else {
+    // 同源 URL：直接開啟下載（<a download> 或開新分頁）
+    e.preventDefault();
+    const url = downloadButton.href || downloadButton.dataset.url;
+    if (!url || url === '#') { showToast('沒有可下載的內容'); return; }
+    const title = downloadButton.dataset.title || 'download';
+    const safe = title.replace(/[\\/:*?"<>|\x00-\x1f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) || 'download';
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = safe;
+    a.rel = 'noopener';
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+});
+
+// 下載失敗：錯誤訊息顯示在結果區並停留較久
+function showDownloadError(msg, status) {
+  const detail = status ? `（HTTP ${status}）` : '';
+  const errorBox = document.getElementById('errorBox');
+  const errorText = document.getElementById('errorText');
+  if (errorBox && errorText) {
+    errorBox.classList.remove('is-hidden');
+    errorText.textContent = `下載失敗${detail}：${msg}。來源可能已過期或禁止直接存取，請重新解析一次再試。`;
+  }
+  showToast('下載失敗');
+}
+
+parseButton.addEventListener('click', parseCurrentInput);
+// 底部固定下載列：點擊觸發主下載按鈕（共用全部下載邏輯）
+document.getElementById('stickyDownloadButton')?.addEventListener('click', (e) => {
+  e.preventDefault();
+  downloadButton.click();
+});
+input.addEventListener('input', updateCounter);
+input.addEventListener('keydown', (event) => {
+  if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') parseCurrentInput();
+});
+pasteButton.addEventListener('click', async () => {
+  hideError();
+  try {
+    input.value = await navigator.clipboard.readText();
+    updateCounter();
+    input.focus();
+  } catch {
+    showError('瀏覽器沒有允許讀取剪貼簿，請長按輸入框後手動貼上。');
+  }
+});
+clearButton.addEventListener('click', () => {
+  input.value = '';
+  updateCounter();
+  hideError();
+  input.focus();
+});
+copyLinkButton.addEventListener('click', () => copyText(copyLinkButton.dataset.url, '已複製媒體直連'));
+copyTextButton.addEventListener('click', () => copyText(result?.description, '已複製文案'));
+$('copyOptimizedButton').addEventListener('click', () => copyText(analysisResult?.optimizedCopy, '已複製優化文案'));
+$('copyAnalysisButton').addEventListener('click', () => copyText(analysisAsText(analysisResult), '已複製完整分析'));
+$('retryAnalysisButton').addEventListener('click', () => analyzeCurrentResult(result));
+$('clearHistoryButton').addEventListener('click', () => {
+  localStorage.removeItem(HISTORY_KEY);
+  renderHistory();
+syncAiAccessUI();
+  showToast('已清除最近紀錄');
+});
+themeButton.addEventListener('click', () => {
+  applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+});
+
+saveAiAccessCodeButton.addEventListener('click', () => {
+  const value = aiAccessCodeInput.value.trim();
+  if (!value) {
+    setAiAccessCode('');
+    syncAiAccessUI('尚未輸入密碼，請先填入 AI 功能密碼。');
+    return;
+  }
+  setAiAccessCode(value);
+  showToast('已儲存 AI 功能密碼');
+  if (result) analyzeCurrentResult(result);
+});
+
+clearAiAccessCodeButton.addEventListener('click', () => {
+  setAiAccessCode('');
+  syncAiAccessUI();
+  showToast('已清除 AI 功能密碼');
+});
+
+aiAccessCodeInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') saveAiAccessCodeButton.click();
+});
+
+// 縮圖下載 (vd6s-inspired)
+coverDownloadButton.addEventListener('click', () => {
+  const url = coverDownloadButton.dataset.url;
+  if (!url) return;
+  const a = document.createElement('a');
+  a.href = url;
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  a.click();
+  showToast('已開啟封面圖片');
+});
+
+// 貼上自動解析 (vd6s-inspired onpaste auto-trigger)
+input.addEventListener('paste', () => {
+  setTimeout(() => {
+    const val = input.value.trim();
+    if (val.length > 0) {
+      parseCurrentInput();
+    }
+  }, 100);
+});
+
+const preferredTheme = localStorage.getItem('xhs-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+applyTheme(preferredTheme);
+updateCounter();
+renderHistory();
+syncAiAccessUI();

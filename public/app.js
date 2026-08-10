@@ -293,38 +293,18 @@ function configureDownloadLink(link, url, directLabel, title) {
   }
 }
 
-// 外部媒體一律用 blob 下載（不依賴 Content-Disposition — 手機瀏覽器常忽略 filename* 導致亂碼檔名）
-document.addEventListener('click', async (e) => {
+// 外部媒體：直接導向 /api/download 代理（瀏覽器原生下載 — Chromium 全系列支援
+// Content-Disposition filename* UTF-8 中文檔名；blob + a.download 在部分手機瀏覽器
+// 會被忽略導致亂碼，故不用 blob）
+document.addEventListener('click', (e) => {
   const link = e.target.closest('a[data-proxy-url]');
   if (!link) return;
   e.preventDefault();
   const proxyUrl = link.dataset.proxyUrl;
-  // title 可能是 HTML entity（&#x6b21; 等）— 先解碼再當檔名
-  const title = (link.dataset.title || 'download').replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
-    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10)))
-    .replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
   const label = (link === downloadButton) ? downloadLabel : null;
   if (label) label.textContent = '下載中…';
-  try {
-    const resp = await fetch(proxyUrl);
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    const blob = await resp.blob();
-    const ext = resp.headers.get('X-Download-Ext') || 'mp4';
-    const safeName = (title + '.' + ext)
-      .replace(/[\\/:*?"<>|\x00-\x1f]/g, ' ')
-      .replace(/\s+/g, ' ').trim().slice(0, 80) || ('download.' + ext);
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = safeName;
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 5000);
-  } catch (err) {
-    console.error('Blob 下載失敗，改開代理 URL', err);
-    window.open(proxyUrl, '_blank');
-  } finally {
-    if (label) label.textContent = '下載';
-  }
+  window.open(proxyUrl, '_blank');
+  setTimeout(() => { if (label) label.textContent = '下載'; }, 1500);
 });
 
 function renderImages(images, fallbackTitle) {
