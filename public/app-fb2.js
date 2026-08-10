@@ -292,8 +292,10 @@ function configureDownloadLink(link, url, directLabel, title) {
   if (isExternal) {
     // 走 Vercel proxy (HTTPS) 避免 Chrome 阻擋不安全下載
     // title 用解碼後前 30 字（FB 標題超長會撐爆 URL 被手機瀏覽器截斷 → 檔名只剩片段）
+    // 用路徑式 /api/dl/<檔名>?url=... — Android/小米下載器用 URL 尾段當檔名並解碼中文
     const shortTitle = decodeEntities(title || '').replace(/\s+/g, ' ').trim().slice(0, 30);
-    let proxyUrl = '/api/download?url=' + encodeURIComponent(url);
+    const safeShort = shortTitle.replace(/[\\/:*?"<>|]/g, ' ') || 'video';
+    let proxyUrl = '/api/dl/' + encodeURIComponent(safeShort + '.mp4') + '?url=' + encodeURIComponent(url);
     if (shortTitle) proxyUrl += '&title=' + encodeURIComponent(shortTitle);
     link.dataset.proxyUrl = proxyUrl;
     link.dataset.title = title || '';

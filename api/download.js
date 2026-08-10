@@ -5,6 +5,8 @@
  */
 export default async function handler(req, res) {
   const { url, title } = req.query;
+  // 路徑式檔名（/api/dl/<檔名>?url=...）— Android 下載器用 URL 尾段並解碼 %XX
+  const pathName = req.query.name ? decodeURIComponent(req.query.name) : null;
 
   if (!url || typeof url !== 'string') {
     return res.status(400).json({ error: '缺少 url 參數' });
@@ -61,11 +63,21 @@ export default async function handler(req, res) {
     const contentType = response.headers.get('content-type') || 'application/octet-stream';
     const contentLength = response.headers.get('content-length');
 
-    // Extract filename: 優先使用主題標題，否則退回 URL / 類型預設
+    // Extract filename: 路徑檔名 > 主題標題 > URL / 類型預設
     let filename = 'download';
     let ext = 'mp4';
     const fileTitle = safeName(title);
-    if (contentType?.startsWith('video/')) {
+    const pathFileTitle = safeName(pathName);
+    if (pathFileTitle) {
+      // 路徑式：直接取路徑檔名（含正確副檔名）
+      const dot = pathFileTitle.lastIndexOf('.');
+      if (dot > 0) {
+        filename = pathFileTitle;
+        ext = pathFileTitle.slice(dot + 1).toLowerCase();
+      } else {
+        filename = pathFileTitle + '.mp4';
+      }
+    } else if (contentType?.startsWith('video/')) {
       ext = 'mp4';
       filename = fileTitle ? `${fileTitle}.${ext}` : 'video.mp4';
     } else if (contentType?.startsWith('image/')) {

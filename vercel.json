@@ -5,6 +5,10 @@
     {
       "source": "/health",
       "destination": "/api/health"
+    },
+    {
+      "source": "/api/dl/:name",
+      "destination": "/api/download"
     }
   ]
 }
