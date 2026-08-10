@@ -6,7 +6,11 @@
 export default async function handler(req, res) {
   const { url, title } = req.query;
   // 路徑式檔名（/api/dl/<檔名>?url=...）— Android 下載器用 URL 尾段並解碼 %XX
-  const pathName = req.query.name ? decodeURIComponent(req.query.name) : null;
+  // Vercel rewrite 可能已 decode 一次 → 用 try 避免 double-decode 炸掉
+  let pathName = null;
+  if (req.query.name) {
+    try { pathName = decodeURIComponent(req.query.name); } catch { pathName = req.query.name; }
+  }
 
   if (!url || typeof url !== 'string') {
     return res.status(400).json({ error: '缺少 url 參數' });
@@ -91,7 +95,7 @@ export default async function handler(req, res) {
     }
     if (targetUrl.match(/\/[^/]+\.[a-z0-9]+(?:\?|$)/i)) {
       const match = targetUrl.match(/\/([^/?]+)\.([a-z0-9]+)(?:\?|$)/i);
-      if (match && !fileTitle) filename = `xiaohongshu_${match[1].slice(0, 20)}.${match[2]}`;
+      if (match && !fileTitle && !pathFileTitle) filename = `xiaohongshu_${match[1].slice(0, 20)}.${match[2]}`;
     }
 
     // RFC 5987 標準雙參數，但小米/Android 下載器不支援 filename*（只認 filename=）
