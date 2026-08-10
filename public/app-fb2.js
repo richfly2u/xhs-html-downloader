@@ -291,8 +291,10 @@ function configureDownloadLink(link, url, directLabel, title) {
   link.dataset.title = title || '';
   if (isExternal) {
     // 走 Vercel proxy (HTTPS) 避免 Chrome 阻擋不安全下載
+    // title 用解碼後前 30 字（FB 標題超長會撐爆 URL 被手機瀏覽器截斷 → 檔名只剩片段）
+    const shortTitle = decodeEntities(title || '').replace(/\s+/g, ' ').trim().slice(0, 30);
     let proxyUrl = '/api/download?url=' + encodeURIComponent(url);
-    if (title) proxyUrl += '&title=' + encodeURIComponent(title);
+    if (shortTitle) proxyUrl += '&title=' + encodeURIComponent(shortTitle);
     link.dataset.proxyUrl = proxyUrl;
     link.dataset.title = title || '';
     if (link === downloadButton) downloadLabel.textContent = '下載';

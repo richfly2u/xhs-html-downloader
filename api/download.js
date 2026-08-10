@@ -21,12 +21,17 @@ export default async function handler(req, res) {
     const decoded = raw
       .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
       .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10)))
-      .replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
-    return decoded
+      .replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+      .replace(/&nbsp;/g, ' ');
+    // 壓縮空白（含全形空格）→ 單一空格，避免手機下載對話框因空格截斷檔名
+    const collapsed = decoded
+      .replace(/[\s\u00a0]+/g, ' ')
+      .trim();
+    return collapsed
       .replace(/[\\/:*?"<>|\x00-\x1f]/g, ' ')
       .replace(/\s+/g, ' ')
       .trim()
-      .slice(0, 80) || null;
+      .slice(0, 60) || null;
   }
 
   try {
@@ -78,7 +83,8 @@ export default async function handler(req, res) {
     }
 
     // RFC 5987 支援中文檔名（Content-Disposition filename*）
-    const asciiFallback = filename.replace(/[^\x20-\x7e]/g, '_').slice(0, 60);
+    // asciiFallback：非 ASCII 與空格都換底線（部分手機瀏覽器解析 filename= 遇空格截斷）
+    const asciiFallback = filename.replace(/[^\x20-\x7e]/g, '_').replace(/\s+/g, '_').slice(0, 60);
     res.setHeader('Content-Type', contentType);
     res.setHeader('Content-Disposition', `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
     // 自訂 header：讓前端知道真實副檔名（blob.type 常為 octet-stream 不可靠）
