@@ -388,13 +388,18 @@ app.get('/api/media', mediaLimiter, async (req, res) => {
     const disposition = String(req.query.download || '') === '1' ? 'attachment' : 'inline';
     const extension = requestedName.includes('.') ? requestedName.split('.').pop() : 'mp4';
 
-    // 一般 CDN 代理（XHS、YouTube 預覽等）
+    // 一般 CDN 代理（XHS、YouTube 預覽等）；FB CDN（fbcdn）需專用 UA/Referer
+    const isFbCdn = url.hostname.endsWith('.fbcdn.net') || url.hostname === 'fbcdn.net';
     const headers = {
-      'user-agent': req.get('user-agent') || 'Mozilla/5.0',
+      'user-agent': isFbCdn
+        ? 'facebookexternalhit/1.1'
+        : (req.get('user-agent') || 'Mozilla/5.0'),
       accept: 'video/mp4,image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
-      referer: url.hostname.endsWith('.googlevideo.com')
-        ? 'https://www.youtube.com/'
-        : 'https://www.xiaohongshu.com/'
+      referer: isFbCdn
+        ? 'https://www.facebook.com/'
+        : (url.hostname.endsWith('.googlevideo.com')
+          ? 'https://www.youtube.com/'
+          : 'https://www.xiaohongshu.com/')
     };
     if (req.headers.range) headers.range = req.headers.range;
 
