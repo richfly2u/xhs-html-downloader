@@ -32,12 +32,11 @@ export function detect(input) {
 }
 
 const DESKTOP_HEADERS = {
-  'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',
+  // Facebook 對一般瀏覽器 UA 的伺服器端請求會回 400/登入牆；
+  // facebookexternalhit/1.1 是 FB 官方爬蟲 UA，回傳完整頁面含 playable_url
+  'user-agent': 'facebookexternalhit/1.1',
   accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
   'accept-language': 'zh-TW,zh;q=0.9,en;q=0.8',
-  'sec-ch-ua': '"Chromium";v="134", "Not:A-Brand";v="24", "Google Chrome";v="134"',
-  'sec-ch-ua-mobile': '?0',
-  'sec-ch-ua-platform': '"Windows"',
   'sec-fetch-dest': 'document',
   'sec-fetch-mode': 'navigate',
   'sec-fetch-site': 'none',
@@ -92,6 +91,17 @@ function extractOgMeta(html) {
   return { ogVideo, ogImage, ogTitle, ogDesc };
 }
 
+// FB 頁面把影片網址內嵌在 JSON（reel/watch 都一樣）。
+// 優先順序：browser_native_hd_url（720p）→ playable_url_quality_hd → playable_url → browser_native_sd_url
+function extractEmbeddedVideo(html) {
+  const keys = ['browser_native_hd_url', 'playable_url_quality_hd', 'playable_url', 'browser_native_sd_url'];
+  for (const key of keys) {
+    const m = html.match(new RegExp(`"${key}"\\s*:\\s*"([^"]+)"`));
+    if (m && m[1]) return m[1].replace(/\\\//g, '/');
+  }
+  return null;
+}
+
 async function expandAndFetchPage(rawUrl, options) {
   const input = assertHttpUrl(rawUrl);
   await assertPublicResolution(input.hostname);
@@ -130,7 +140,10 @@ export async function resolveShare(inputText, options) {
   const videoId = extractVideoId(finalUrl);
   const og = extractOgMeta(html);
 
-  let videoUrl = og.ogVideo || null;
+  // FB 官方爬蟲 UA 回傳的頁面內嵌 playable_url 系列 JSON — 最可靠
+  const embeddedVideo = extractEmbeddedVideo(html);
+
+  let videoUrl = embeddedVideo || og.ogVideo || null;
   let images = og.ogImage ? [og.ogImage] : [];
   let title = og.ogTitle || null;
   let description = og.ogDesc || null;
