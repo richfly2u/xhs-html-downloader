@@ -8,7 +8,7 @@
     },
     {
       "source": "/api/dl/:name",
-      "destination": "/api/download"
+      "destination": "/api/download?name=:name"
     }
   ]
 }
