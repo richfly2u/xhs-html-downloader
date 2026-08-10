@@ -299,7 +299,10 @@ document.addEventListener('click', async (e) => {
   if (!link) return;
   e.preventDefault();
   const proxyUrl = link.dataset.proxyUrl;
-  const title = link.dataset.title || 'download';
+  // title 可能是 HTML entity（&#x6b21; 等）— 先解碼再當檔名
+  const title = (link.dataset.title || 'download').replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10)))
+    .replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
   const label = (link === downloadButton) ? downloadLabel : null;
   if (label) label.textContent = '下載中…';
   try {
