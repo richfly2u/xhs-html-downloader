@@ -82,11 +82,12 @@ export default async function handler(req, res) {
       if (match && !fileTitle) filename = `xiaohongshu_${match[1].slice(0, 20)}.${match[2]}`;
     }
 
-    // RFC 5987 支援中文檔名（Content-Disposition filename*）
-    // asciiFallback：非 ASCII 與空格都換底線（部分手機瀏覽器解析 filename= 遇空格截斷）
-    const asciiFallback = filename.replace(/[^\x20-\x7e]/g, '_').replace(/\s+/g, '_').slice(0, 60);
+    // RFC 5987 標準雙參數，但小米/Android 下載器不支援 filename*（只認 filename=）
+    // → filename= 直接放 UTF-8 中文（Android 下載器接受；桌面瀏覽器也相容）
+    // 保留 filename* 給舊 Chrome 系列做雙保險
+    const cdFilename = filename.replace(/"/g, "'");
     res.setHeader('Content-Type', contentType);
-    res.setHeader('Content-Disposition', `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
+    res.setHeader('Content-Disposition', `attachment; filename="${cdFilename}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
     // 自訂 header：讓前端知道真實副檔名（blob.type 常為 octet-stream 不可靠）
     res.setHeader('X-Download-Ext', ext);
     if (contentLength) res.setHeader('Content-Length', contentLength);
