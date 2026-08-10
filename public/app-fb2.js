@@ -263,6 +263,16 @@ function parserName(value) {
   return names[value] || value || '';
 }
 
+// HTML entity 解碼（FB/各家標題常帶 &#x6b21; 等；textContent 不會自動解碼）
+function decodeEntities(s) {
+  if (!s) return s;
+  return String(s)
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10)))
+    .replace(/&amp;/g, '&').replace(/&quot;/g, '"')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ');
+}
+
 function iconDownload() {
   return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 20h14"/></svg>';
 }
@@ -472,7 +482,7 @@ function renderResult(data) {
     platformLabel.textContent = data.platform || '';
     platformLabel.classList.toggle('is-hidden', !data.platform);
   }
-  $('resultTitle').textContent = data.title || '未命名作品';
+  $('resultTitle').textContent = decodeEntities(data.title) || '未命名作品';
   $('formatValue').textContent = data.format || (isVideo ? 'MP4' : '圖片');
   $('sizeValue').textContent = data.size || '未提供';
   if (!(data.platform === 'youtube' && data.formats?.length)) {
@@ -505,7 +515,7 @@ function renderResult(data) {
   if (stickyBar && stickyLabel) {
     const dlText = downloadLabel.textContent;
     stickyLabel.textContent = dlText;
-    stickyTitle.textContent = data.title || (isVideo ? '影片' : '圖片');
+    stickyTitle.textContent = decodeEntities(data.title) || (isVideo ? '影片' : '圖片');
     stickyBar.classList.remove('is-hidden');
     document.body.classList.add('has-sticky-dl');
   }
@@ -675,7 +685,7 @@ function renderHistory() {
     const info = document.createElement('span');
     info.className = 'history-info';
     const title = document.createElement('strong');
-    title.textContent = item.title;
+    title.textContent = decodeEntities(item.title);
     const detail = document.createElement('span');
     detail.textContent = `${item.type === 'video' ? '影片' : '圖片'} · ${relativeTime(item.time)}`;
     info.append(title, detail);
