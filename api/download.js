@@ -98,11 +98,15 @@ export default async function handler(req, res) {
       if (match && !fileTitle && !pathFileTitle) filename = `xiaohongshu_${match[1].slice(0, 20)}.${match[2]}`;
     }
 
-    // RFC 5987 標準雙參數；Node/undici 的 header 不允許原始 UTF-8 → filename= 放
-    // percent-encoded 中文（純 ASCII，Android/小米下載器會 decode）；filename* 給桌面
-    const cdFilename = encodeURIComponent(filename);
+    // Android 系統 DownloadManager（MIUI 瀏覽器用）行為：
+    // - 只解析 filename="..."（regex），完全忽略 filename*（RFC 5987）
+    // - filename= 放 percent-encoded → 字面存成 %E8%93..（不解碼）
+    // - filename= 放原始 UTF-8 → ISO-8859-1 解碼 → mojibake
+    // 唯一跨裝置一致的中文方案：不設 CD filename，讓下載器 fallback 到
+    // URL path 尾段（/api/dl/中文.mp4 → percent-encoded → 解碼成中文）
+    // Chrome/桌面也用 URL path（同樣支援），filename* 已不需要
     res.setHeader('Content-Type', contentType);
-    res.setHeader('Content-Disposition', `attachment; filename="${cdFilename}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
+    res.setHeader('Content-Disposition', 'attachment');
     // 自訂 header：讓前端知道真實副檔名（blob.type 常為 octet-stream 不可靠）
     res.setHeader('X-Download-Ext', ext);
     if (contentLength) res.setHeader('Content-Length', contentLength);
