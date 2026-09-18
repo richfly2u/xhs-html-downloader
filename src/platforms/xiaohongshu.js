@@ -215,10 +215,22 @@ function isVideoUrl(url) {
   }
 }
 
+// 小紅書自己的介面圖示／貼圖資源（fe-platform.xhscdn.com/platform/...）。
+// 未登入時筆記頁會被導到登入頁，整頁掃描只會撈到這些圖示 → 必須排除，
+// 否則會把「5 張介面圖示」當成筆記內容回給使用者（2026-09-18 實證）。
+function isPlatformAsset(parsed) {
+  const host = parsed.hostname.toLowerCase();
+  const target = `${parsed.pathname}${parsed.search}`.toLowerCase();
+  if (host.startsWith('fe-platform.')) return true;
+  if (target.startsWith('/platform/')) return true;
+  return /fe-platform-file|\/fe-platform\//i.test(target);
+}
+
 function isImageUrl(url) {
   try {
     const parsed = new URL(url);
     if (!isMediaHost(parsed.hostname)) return false;
+    if (isPlatformAsset(parsed)) return false;
     const value = `${parsed.hostname}${parsed.pathname}${parsed.search}`.toLowerCase();
     if (/video|\.mp4(?:$|\?)/i.test(parsed.pathname + parsed.search)) return false;
     if (/\.srt(?:$|\?)|\.js(?:$|\?)|\.zip(?:$|\?)|\/subtitle\/|\/avatar\/|fe-platform-file|fe-platform\//i.test(value)) return false;
@@ -329,12 +341,15 @@ export function parsePublicPageHtml(html, finalUrl = '') {
 
     ({ videos, images } = pickMediaUrls(strings));
   }
-  const title =
+  const rawTitle =
     getString(noteCard, ['title', 'displayTitle', 'display_title']) ||
     $('meta[property="og:title"]').attr('content') ||
     $('meta[name="twitter:title"]').attr('content') ||
     $('title').first().text().trim() ||
     null;
+  // 未登入被導到登入頁時，標題會是網站通用標題（不是筆記標題）→ 視為沒有標題
+  const GENERIC_TITLE = /^小红书\s*[-－·]\s*你的生活兴趣社区$/;
+  const title = rawTitle && !GENERIC_TITLE.test(rawTitle.trim()) ? rawTitle : null;
   const description =
     getString(noteCard, ['desc', 'description', 'content']) ||
     $('meta[property="og:description"]').attr('content') ||
@@ -390,6 +405,99 @@ async function expandAndFetchPage(rawUrl, options) {
   return { html, finalUrl: finalUrl.toString() };
 }
 
+// ── XHS-Downloader API 備援（HTML 解析失效時）─────────────────────────────
+// 小紅書自 2026-08 起對未登入的筆記頁 302 導到 /login，整頁掃描只剩介面圖示。
+// VPS 同機的 XHS-Downloader（curl_cffi 模擬 Chrome 指紋）用同一組帶 xsec_token
+// 的連結仍能拿到真正的影片／圖文，故以此作為備援來源。
+const XHS_DL_API = String(process.env.XHS_DL_API || 'https://media.link2publish.app').replace(/\/+$/, '');
+const XHS_DL_TIMEOUT_MS = Number(process.env.XHS_DL_TIMEOUT_MS || 45_000);
+
+// 未登入時小紅書 302 到 /login?redirectPath=<真正的筆記網址（含 xsec_token）>
+export function canonicalNoteUrl(finalUrl, fallbackUrl) {
+  try {
+    const parsed = new URL(finalUrl);
+    if (/\/login/i.test(parsed.pathname)) {
+      const redirectPath = parsed.searchParams.get('redirectPath');
+      if (redirectPath) {
+        const inner = new URL(redirectPath);
+        if (hosts.has(inner.hostname.toLowerCase())) return inner.toString();
+      }
+    }
+  } catch {
+    // 不是登入導頁或網址不合法 → 用原連結
+  }
+  return fallbackUrl || finalUrl || null;
+}
+
+// 小紅書回傳的媒體網址常是 http:// → 前端在 HTTPS 頁面會被混合內容擋掉，一律升為 https
+function toHttpsUrl(raw) {
+  const clean = sanitizeCandidate(String(raw || ''));
+  if (!clean) return null;
+  return clean.replace(/^http:\/\//i, 'https://');
+}
+
+function toUrlList(raw) {
+  if (!raw) return [];
+  const items = Array.isArray(raw) ? raw : [raw];
+  return unique(items.map(toHttpsUrl).filter(Boolean));
+}
+
+async function resolveViaDownloaderApi(noteUrl, options) {
+  if (!noteUrl || !XHS_DL_API) return null;
+  const budget = Math.max(8000, Math.min(Number(options?.timeoutMs || 20000), XHS_DL_TIMEOUT_MS));
+  try {
+    const response = await fetch(`${XHS_DL_API}/api/xhs-detail?url=${encodeURIComponent(noteUrl)}`, {
+      signal: AbortSignal.timeout(budget)
+    });
+    if (!response.ok) return null;
+    const payload = await response.json().catch(() => null);
+    const works = payload?.data;
+    if (!works || typeof works !== 'object') return null;
+
+    const worksType = String(works['作品类型'] || '');
+    const isVideo = /视频|影片/.test(worksType);
+    const mediaUrls = toUrlList(works['下载地址']);
+    const animatedUrls = toUrlList(works['动图地址']);
+
+    if (isVideo) {
+      if (!mediaUrls.length) return null;
+      return {
+        platform: 'xiaohongshu',
+        sourceUrl: noteUrl,
+        noteId: works['作品ID'] || null,
+        title: works['作品标题'] || null,
+        description: works['作品描述'] || null,
+        author: works['作者昵称'] || null,
+        cover: animatedUrls[0] || null,
+        type: 'video',
+        videoUrl: mediaUrls[0],
+        alternatives: mediaUrls.slice(1, 8),
+        images: animatedUrls.slice(0, 30),
+        parser: 'xhs-downloader-api'
+      };
+    }
+
+    const gallery = unique([...mediaUrls, ...animatedUrls]);
+    if (!gallery.length) return null;
+    return {
+      platform: 'xiaohongshu',
+      sourceUrl: noteUrl,
+      noteId: works['作品ID'] || null,
+      title: works['作品标题'] || null,
+      description: works['作品描述'] || null,
+      author: works['作者昵称'] || null,
+      cover: gallery[0] || null,
+      type: 'images',
+      videoUrl: null,
+      alternatives: [],
+      images: gallery.slice(0, 30),
+      parser: 'xhs-downloader-api'
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function resolveShare(inputText, options) {
   const extracted = extractFirstUrl(inputText);
   if (!extracted) throw new Error('找不到可解析的網址');
@@ -413,9 +521,42 @@ export async function resolveShare(inputText, options) {
     };
   }
 
-  const { html, finalUrl } = await expandAndFetchPage(input.toString(), options);
+  let html;
+  let finalUrl;
+  try {
+    ({ html, finalUrl } = await expandAndFetchPage(input.toString(), options));
+  } catch (pageError) {
+    // 頁面本身抓不到（地區限制、逾時、風控）→ 直接走 XHS-Downloader API
+    if (!XHS_DL_API) throw pageError;
+    const apiResult = await resolveViaDownloaderApi(input.toString(), options);
+    if (apiResult) return apiResult;
+    const error = new Error(`無法取得筆記資料（頁面無法存取：${pageError.message}；備援下載器也沒有回傳作品）`);
+    error.code = 'MEDIA_NOT_FOUND';
+    throw error;
+  }
+
   const result = parsePublicPageHtml(html, finalUrl);
   result.platform = 'xiaohongshu';
+
+  // HTML 解析拿不到影片（未登入導頁／改版）→ 改用 XHS-Downloader API 取真資料
+  if (!result.videoUrl && XHS_DL_API) {
+    const noteUrl = canonicalNoteUrl(finalUrl, input.toString());
+    const apiResult = await resolveViaDownloaderApi(noteUrl, options);
+    if (apiResult && (apiResult.videoUrl || apiResult.images.length)) {
+      result.noteId = result.noteId || apiResult.noteId;
+      result.title = apiResult.title || result.title;
+      result.description = apiResult.description || result.description;
+      result.author = apiResult.author || result.author;
+      result.cover = result.cover || apiResult.cover;
+      result.type = apiResult.type;
+      result.videoUrl = apiResult.videoUrl;
+      result.alternatives = apiResult.alternatives;
+      // API 是自己解析筆記本體，圖片比整頁掃描可靠 → 直接採用
+      result.images = apiResult.images;
+      result.parser = apiResult.parser;
+    }
+  }
+
   if (!result.videoUrl && result.images.length === 0) {
     const error = new Error('公開頁面中沒有找到可下載媒體；可能需要登入、遇到驗證、頁面已改版，或作品不可公開存取');
     error.code = 'MEDIA_NOT_FOUND';

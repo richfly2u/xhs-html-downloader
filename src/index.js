@@ -42,6 +42,11 @@ const __ytdlpBin = path.resolve(__dirname, '../node_modules/.bin/yt-dlp' + (proc
 const YTDLP_BIN = existsSync(__ytdlpBin) ? __ytdlpBin : 'yt-dlp';
 const DEFAULT_YOUTUBE_COOKIES_PATH = path.resolve(__dirname, '../.secrets/youtube-cookies.txt');
 
+// 小紅書 XHS-Downloader API（curl_cffi 模擬 Chrome 指紋）— HTML 解析失效時的備援來源。
+// 本專案部署在兩處：VPS（下載器同機 127.0.0.1:5556）與 Vercel（需走對外網址）。
+const XHS_DL_API_INTERNAL = String(process.env.XHS_DL_INTERNAL || 'http://127.0.0.1:5556/xhs/detail');
+const XHS_DL_TIMEOUT_MS = Number(process.env.XHS_DL_TIMEOUT_MS || 45_000);
+
 if (process.env.VERCEL || process.env.RAILWAY_ENVIRONMENT || String(process.env.TRUST_PROXY || 'false').toLowerCase() === 'true') {
   app.set('trust proxy', 1);
 }
@@ -362,6 +367,35 @@ app.post('/api/analyze', parseLimiter, async (req, res) => {
     const message = error instanceof Error ? error.message : '文案分析失敗';
     const status = error?.code === 'NO_ANALYSIS_SOURCE' ? 422 : 400;
     return res.status(status).json({ success: false, error: message });
+  }
+});
+
+app.get('/api/xhs-detail', mediaLimiter, async (req, res) => {
+  // 小紅書筆記資料轉發：本機 XHS-Downloader API（5556，curl_cffi 模擬 Chrome 指紋）。
+  // 用途：小紅書自 2026-08 起對未登入的筆記頁 302 導到 /login，HTML 解析只剩介面圖示；
+  // 這條路用同一組帶 xsec_token 的連結即可拿到真正的影片／圖文資料（2026-09-18 實測）。
+  try {
+    const noteUrl = String(req.query.url || '');
+    if (!noteUrl || !/^https?:\/\//i.test(noteUrl)) {
+      return res.status(400).json({ success: false, error: '缺少 url 參數' });
+    }
+    const upstream = await fetch(XHS_DL_API_INTERNAL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url: noteUrl, download: false, check_record: false }),
+      signal: AbortSignal.timeout(XHS_DL_TIMEOUT_MS)
+    });
+    if (!upstream.ok) {
+      return res.status(502).json({ success: false, error: `下載器回應錯誤：HTTP ${upstream.status}` });
+    }
+    const payload = await upstream.json().catch(() => null);
+    if (!payload || !payload.data) {
+      return res.status(502).json({ success: false, error: payload?.message || '下載器沒有回傳作品資料' });
+    }
+    return res.json({ success: true, data: payload.data });
+  } catch (error) {
+    const message = error?.name === 'TimeoutError' ? '下載器逾時' : (error?.message || '取得筆記資料失敗');
+    return res.status(502).json({ success: false, error: message });
   }
 });
 
