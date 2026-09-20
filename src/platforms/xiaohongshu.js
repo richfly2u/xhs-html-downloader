@@ -231,6 +231,9 @@ function isImageUrl(url) {
     const parsed = new URL(url);
     if (!isMediaHost(parsed.hostname)) return false;
     if (isPlatformAsset(parsed)) return false;
+    // 🔴 必須有實際路徑（2026-09-20）：未登入導頁的登入頁會出現「只有主機名」的殘缺網址
+    //    （實例 https://sns-webpic-qc.xhscdn.com/），拿去抓一定 403，卻會被 sns-webpic 規則放行
+    if (!/[^/]/.test(parsed.pathname)) return false;
     const value = `${parsed.hostname}${parsed.pathname}${parsed.search}`.toLowerCase();
     if (/video|\.mp4(?:$|\?)/i.test(parsed.pathname + parsed.search)) return false;
     if (/\.srt(?:$|\?)|\.js(?:$|\?)|\.zip(?:$|\?)|\/subtitle\/|\/avatar\/|fe-platform-file|fe-platform\//i.test(value)) return false;
@@ -430,6 +433,18 @@ export function canonicalNoteUrl(finalUrl, fallbackUrl) {
 }
 
 // 小紅書回傳的媒體網址常是 http:// → 前端在 HTTPS 頁面會被混合內容擋掉，一律升為 https
+// 封面用驗證：只要是有「實際路徑」的 http(s) 網址即可
+// （不套媒體主機白名單，避免誤殺合法的 og:image 封面）
+function isUsableCoverUrl(url) {
+  try {
+    const parsed = new URL(String(url || ''));
+    if (!['http:', 'https:'].includes(parsed.protocol)) return false;
+    return /[^/]/.test(parsed.pathname);
+  } catch {
+    return false;
+  }
+}
+
 function toHttpsUrl(raw) {
   const clean = sanitizeCandidate(String(raw || ''));
   if (!clean) return null;
@@ -538,6 +553,7 @@ export async function resolveShare(inputText, options) {
   const result = parsePublicPageHtml(html, finalUrl);
   result.platform = 'xiaohongshu';
 
+
   // HTML 解析拿不到影片（未登入導頁／改版）→ 改用 XHS-Downloader API 取真資料
   if (!result.videoUrl && XHS_DL_API) {
     const noteUrl = canonicalNoteUrl(finalUrl, input.toString());
@@ -547,7 +563,11 @@ export async function resolveShare(inputText, options) {
       result.title = apiResult.title || result.title;
       result.description = apiResult.description || result.description;
       result.author = apiResult.author || result.author;
-      result.cover = result.cover || apiResult.cover;
+      // 🔴 API 解析是筆記本體 → 封面優先採用；HTML 封面必須通過「有實際路徑」驗證
+      //    （2026-09-20：登入頁殘缺網址曾蓋掉空值，導致 /api/thumbnail 一律 403）
+      result.cover = apiResult.cover && isUsableCoverUrl(apiResult.cover)
+        ? apiResult.cover
+        : (isUsableCoverUrl(result.cover) ? result.cover : null);
       result.type = apiResult.type;
       result.videoUrl = apiResult.videoUrl;
       result.alternatives = apiResult.alternatives;
