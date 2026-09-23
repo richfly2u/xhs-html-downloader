@@ -297,10 +297,15 @@ function configureDownloadLink(link, url, directLabel, title) {
     const safeShort = shortTitle.replace(/[\\/:*?"<>|]/g, ' ') || 'video';
     let proxyUrl = '/api/dl/' + encodeURIComponent(safeShort + '.mp4') + '?url=' + encodeURIComponent(url);
     if (shortTitle) proxyUrl += '&title=' + encodeURIComponent(shortTitle);
-    link.dataset.proxyUrl = proxyUrl;
+    // 真連結：點擊就是瀏覽器原生下載（代理回 Content-Disposition: attachment）
+    link.href = proxyUrl;
     link.dataset.title = title || '';
+    link.removeAttribute('target');
+    link.removeAttribute('rel');
+    link.removeAttribute('download');
     if (link === downloadButton) downloadLabel.textContent = '下載';
   } else {
+    link.href = url || '#';
     link.removeAttribute('target');
     link.removeAttribute('rel');
     link.setAttribute('download', '');
@@ -310,16 +315,7 @@ function configureDownloadLink(link, url, directLabel, title) {
 // 外部媒體：直接導向 /api/download 代理（瀏覽器原生下載 — Chromium 全系列支援
 // Content-Disposition filename* UTF-8 中文檔名；blob + a.download 在部分手機瀏覽器
 // 會被忽略導致亂碼，故不用 blob）
-document.addEventListener('click', (e) => {
-  const link = e.target.closest('a[data-proxy-url]');
-  if (!link) return;
-  e.preventDefault();
-  const proxyUrl = link.dataset.proxyUrl;
-  const label = (link === downloadButton) ? downloadLabel : null;
-  if (label) label.textContent = '下載中…';
-  window.open(proxyUrl, '_blank');
-  setTimeout(() => { if (label) label.textContent = '下載'; }, 1500);
-});
+// 下載不再攔截 click、不用 window.open（App 內建瀏覽器會擋 popup）
 
 function renderImages(images, fallbackTitle) {
   imageGrid.textContent = '';
@@ -520,6 +516,8 @@ function renderResult(data) {
     const dlText = downloadLabel.textContent;
     stickyLabel.textContent = dlText;
     stickyTitle.textContent = decodeEntities(data.title) || (isVideo ? '影片' : '圖片');
+    const stickyBtn = document.getElementById('stickyDownloadButton');
+    if (stickyBtn) stickyBtn.href = downloadButton.href;
     stickyBar.classList.remove('is-hidden');
     document.body.classList.add('has-sticky-dl');
   }
@@ -717,61 +715,17 @@ function applyTheme(theme) {
   themeButton.setAttribute('aria-label', theme === 'dark' ? '切換淺色模式' : '切換深色模式');
 }
 
-downloadButton.addEventListener('click', async (e) => {
-  if (downloadButton.dataset.external === '1') {
-    e.preventDefault();
-    const proxyUrl = downloadButton.dataset.proxyUrl;
-    if (!proxyUrl) { showToast('無法取得下載連結'); return; }
-    downloadLabel.textContent = '下載中…';
-    try {
-      const response = await fetch(proxyUrl);
-      if (!response.ok) {
-        // 嘗試讀取後端錯誤訊息，給明確原因
-        let msg = '伺服器回應錯誤';
-        try {
-          const err = await response.json();
-          if (err?.error) msg = err.error;
-        } catch {}
-        showDownloadError(msg, response.status);
-        return;
-      }
-      const blob = await response.blob();
-      // 副檔名以後端 header 為準（blob.type 常為 octet-stream 不可靠）
-      const serverExt = response.headers.get('X-Download-Ext') || '';
-      const title = downloadButton.dataset.title || '';
-      const ext = serverExt || (blob.type.includes('video') ? 'mp4' : 'jpg');
-      const safeTitle = title.replace(/[\\/:*?"<>|\x00-\x1f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) || 'download';
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${safeTitle}.${ext}`;
-      a.style.display = 'none';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-      showToast('下載完成');
-    } catch (err) {
-      showDownloadError('下載失敗：' + (err?.message || '網路錯誤'), 0);
-    }
-    downloadLabel.textContent = '下載';
-  } else {
-    // 同源 URL：直接開啟下載（<a download> 或開新分頁）
-    e.preventDefault();
-    const url = downloadButton.href || downloadButton.dataset.url;
-    if (!url || url === '#') { showToast('沒有可下載的內容'); return; }
-    const title = downloadButton.dataset.title || 'download';
-    const safe = title.replace(/[\\/:*?"<>|\x00-\x1f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) || 'download';
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = safe;
-    a.rel = 'noopener';
-    a.style.display = 'none';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-  }
-});
+// 下載鈕與底部列都是 <a> 真連結（href = /api/dl/... 同源代理）：
+// 只做文字回饋，不 preventDefault、不 window.open、不 fetch→blob（大檔會爆手機記憶體）。
+function bindDownloadFeedback(link, label) {
+  if (!link || !label) return;
+  link.addEventListener('click', () => {
+    if (link.dataset.external !== '1') return;
+    const original = label.textContent;
+    label.textContent = '下載中…';
+    setTimeout(() => { label.textContent = original; }, 3000);
+  });
+}
 
 // 下載失敗：錯誤訊息顯示在結果區並停留較久
 function showDownloadError(msg, status) {
@@ -787,10 +741,8 @@ function showDownloadError(msg, status) {
 
 parseButton.addEventListener('click', parseCurrentInput);
 // 底部固定下載列：點擊觸發主下載按鈕（共用全部下載邏輯）
-document.getElementById('stickyDownloadButton')?.addEventListener('click', (e) => {
-  e.preventDefault();
-  downloadButton.click();
-});
+bindDownloadFeedback(downloadButton, downloadLabel);
+bindDownloadFeedback(document.getElementById('stickyDownloadButton'), document.getElementById('stickyDownloadLabel'));
 input.addEventListener('input', updateCounter);
 input.addEventListener('keydown', (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') parseCurrentInput();
@@ -875,3 +827,22 @@ applyTheme(preferredTheme);
 updateCounter();
 renderHistory();
 syncAiAccessUI();
+
+// App 內建瀏覽器（Telegram / LINE / FB / IG）常擋下載 → 給明確指引
+(function inAppBrowserHint() {
+  const ua = navigator.userAgent || '';
+  const inApp = /MicroMessenger|Line|FBAN|FBAV|Instagram|Twitter|Telegram|XiaoHongShu|wv/i.test(ua);
+  if (!inApp) return;
+  const bar = document.getElementById('stickyDownloadBar');
+  if (!bar) return;
+  const hint = document.createElement('div');
+  hint.id = 'inAppHint';
+  hint.style.cssText = 'padding:9px 11px;margin-bottom:9px;border:1px solid rgba(207,56,75,.28);'
+    + 'border-radius:11px;background:rgba(246,79,99,.10);color:#c83247;font-size:12.5px;line-height:1.55;text-align:left';
+  const intentUrl = 'intent://' + location.host + location.pathname + '#Intent;scheme=https;package=com.android.chrome;end';
+  const isAndroid = /Android/i.test(ua);
+  hint.innerHTML = '⚠️ 目前在 App 內建瀏覽器，可能無法直接下載。請點右上角「⋯」→「用 Chrome 開啟」'
+    + (isAndroid ? '，或<a href="' + intentUrl + '" style="color:#c83247;font-weight:800">點這裡用 Chrome 開啟</a>' : '')
+    + '。';
+  bar.insertBefore(hint, bar.firstChild);
+})();
